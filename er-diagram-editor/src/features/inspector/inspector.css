@@ -1,0 +1,228 @@
+/* Right-hand property panel.
+ *
+ * Deliberately quiet: the canvas is the subject, the panel is an instrument beside it.
+ * No cards, no shadows, no accent colour — the one saturated blue in the palette stays
+ * reserved for the traced path, or the panel would compete with the diagram for it.
+ */
+
+.erd-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.erd-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.erd-inspector {
+  width: 288px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--erd-panel);
+  border-left: 1px solid var(--erd-rule);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-inspector__section {
+  padding: var(--erd-space-3);
+  border-bottom: 1px solid var(--erd-rule);
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-3);
+}
+
+.erd-inspector__section h3 {
+  margin: 0;
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+  letter-spacing: 0.02em;
+}
+
+.erd-inspector__sectionhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.erd-inspector__rowactions {
+  display: flex;
+  gap: var(--erd-space-1);
+}
+
+.erd-inspector__field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-1);
+}
+
+.erd-inspector__labelled {
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-1);
+}
+
+.erd-inspector__label {
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+}
+
+.erd-inspector__hint {
+  display: block;
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+  line-height: 1.4;
+}
+
+.erd-inspector__empty {
+  margin: 0;
+  color: var(--erd-ink-muted);
+  line-height: 1.5;
+}
+
+/* The cardinality sentence. Prose because cardinality is the most misread part of an ER
+   diagram and two dropdowns do not tell you what they mean together. */
+.erd-inspector__reading {
+  margin: 0;
+  padding: var(--erd-space-2);
+  background: var(--erd-node-header);
+  border-radius: var(--erd-radius);
+  color: var(--erd-ink-muted);
+  line-height: 1.5;
+}
+
+.erd-inspector__reading strong {
+  color: var(--erd-ink);
+  font-weight: 600;
+}
+
+.erd-input {
+  font: inherit;
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink);
+  background: var(--erd-node);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius);
+  padding: var(--erd-space-1) var(--erd-space-2);
+  width: 100%;
+}
+
+.erd-select--block {
+  width: 100%;
+}
+
+.erd-toggles {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-2);
+}
+
+.erd-toggles legend {
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+  padding: 0 0 var(--erd-space-1);
+}
+
+.erd-toggle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erd-toggle__control {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--erd-space-2);
+  align-items: start;
+  cursor: pointer;
+}
+
+/* The hint is a sibling of the label, so it needs indenting to line up under the text
+   rather than under the checkbox. */
+.erd-toggle > .erd-inspector__hint {
+  padding-left: calc(13px + var(--erd-space-2));
+}
+
+.erd-toggle[data-disabled] .erd-toggle__control {
+  cursor: not-allowed;
+  color: var(--erd-ink-faint);
+}
+
+.erd-toggle input {
+  margin-top: 2px;
+  accent-color: var(--erd-signal);
+}
+
+.erd-toggle__text {
+  line-height: 1.35;
+}
+
+.erd-fieldlist {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.erd-fieldlist__item {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--erd-space-2);
+  width: 100%;
+  font: inherit;
+  font-size: var(--erd-text-sm);
+  text-align: left;
+  padding: var(--erd-space-1) var(--erd-space-2);
+  color: var(--erd-ink);
+  background: transparent;
+  border: none;
+  border-radius: var(--erd-radius);
+  cursor: pointer;
+}
+
+.erd-fieldlist__item:hover {
+  background: var(--erd-node-header);
+}
+
+.erd-fieldlist__item[data-selected] {
+  background: var(--erd-signal-wash);
+}
+
+.erd-fieldlist__item [data-key] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.erd-fieldlist__type {
+  font-family: var(--erd-font-mono);
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+}
+
+.erd-btn--small {
+  padding: 0 var(--erd-space-2);
+  font-size: var(--erd-text-xs);
+}
+
+.erd-btn--danger {
+  color: var(--erd-danger);
+  border-color: color-mix(in srgb, var(--erd-danger) 40%, var(--erd-rule));
+}
+
+.erd-btn--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--erd-danger) 8%, transparent);
+}
+
+/* NFR-5.4: below 1280px the panel would leave too little canvas to be useful, so it
+   collapses rather than squeezing the diagram into a gutter. */
+@media (width < 1100px) {
+  .erd-inspector {
+    display: none;
+  }
+}

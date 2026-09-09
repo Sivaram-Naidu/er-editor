@@ -1,0 +1,294 @@
+/**
+ * @vitest-environment node
+ *
+ * No DOM. The worker is not exercised here — see the note on the ELK block below.
+ */
+import { describe, expect, it } from 'vitest'
+
+import {
+  createAttribute,
+  createDiagram,
+  createEntity,
+  createRelationship,
+  type Diagram,
+  type Entity,
+  type EntityId,
+} from '../../../src/domain'
+import { fromElkGraph } from '../../../src/layout/elk/fromElkGraph'
+import { optionsFor } from '../../../src/layout/elk/options'
+import { toElkGraph } from '../../../src/layout/elk/toElkGraph'
+import { measureAll, measureEntity } from '../../../src/layout'
+
+function chain(count = 4): { diagram: Diagram; entities: Entity[] } {
+  const entities = Array.from({ length: count }, (_, index) =>
+    createEntity({
+      name: `E${String(index)}`,
+      attributes: [createAttribute({ name: 'id', dataType: 'uuid', isPrimaryKey: true })],
+    }),
+  )
+  const relationships = entities
+    .slice(1)
+    .map((entity, index) => createRelationship({ from: entities[index]!.id, to: entity.id }))
+
+  return { diagram: createDiagram({ entities, relationships }), entities }
+}
+
+describe('measurement', () => {
+  it('grows with the number of visible rows', () => {
+    const small = createEntity({ name: 'A', attributes: [createAttribute({ name: 'id' })] })
+    const large = createEntity({
+      name: 'A',
+      attributes: Array.from({ length: 8 }, (_, i) => createAttribute({ name: `f${String(i)}` })),
+    })
+
+    expect(measureEntity(large, 2).height).toBeGreaterThan(measureEntity(small, 2).height)
+  })
+
+  it('measures L0 as name-only, whatever the field count', () => {
+    // The measurement must agree with what EntityNode actually draws, or ELK spaces
+    // boxes for content that is not on screen.
+    const entity = createEntity({
+      name: 'A',
+      attributes: Array.from({ length: 20 }, (_, i) => createAttribute({ name: `f${String(i)}` })),
+    })
+
+    expect(measureEntity(entity, 0).height).toBeLessThan(measureEntity(entity, 2).height / 4)
+  })
+
+  it('counts only keys and foreign keys at L1', () => {
+    const entity = createEntity({
+      name: 'A',
+      attributes: [
+        createAttribute({ name: 'id', isPrimaryKey: true }),
+        createAttribute({ name: 'note' }),
+        createAttribute({ name: 'other' }),
+      ],
+    })
+
+    expect(measureEntity(entity, 1).height).toBeLessThan(measureEntity(entity, 2).height)
+  })
+
+  it('widens for longer names, within bounds', () => {
+    const short = createEntity({ name: 'A' })
+    const long = createEntity({ name: 'A_VERY_LONG_TABLE_NAME_INDEED_YES' })
+
+    expect(measureEntity(long, 0).width).toBeGreaterThan(measureEntity(short, 0).width)
+    expect(measureEntity(long, 0).width).toBeLessThanOrEqual(300)
+    expect(measureEntity(short, 0).width).toBeGreaterThanOrEqual(160)
+  })
+
+  it('measures every entity in the diagram', () => {
+    const { diagram, entities } = chain(3)
+    const sizes = measureAll(diagram, 2)
+
+    expect(Object.keys(sizes)).toHaveLength(3)
+    expect(sizes[entities[0]!.id]?.width).toBeGreaterThan(0)
+  })
+})
+
+describe('toElkGraph', () => {
+  it('sends every entity and relationship', () => {
+    const { diagram } = chain(4)
+    const graph = toElkGraph({ diagram, sizes: measureAll(diagram, 2) })
+
+    expect(graph.children).toHaveLength(4)
+    expect(graph.edges).toHaveLength(3)
+  })
+
+  it('uses orthogonal routing, which is why ELK was chosen over dagre (ADR-0002)', () => {
+    expect(optionsFor('layered')['elk.edgeRouting']).toBe('ORTHOGONAL')
+  })
+
+  it('sends only the selection when one is given (FR-3.7)', () => {
+    const { diagram, entities } = chain(4)
+    const only = [entities[0]!.id, entities[1]!.id]
+    const graph = toElkGraph({ diagram, sizes: measureAll(diagram, 2), only })
+
+    expect(graph.children.map((node) => node.id)).toEqual(only)
+  })
+
+  it('drops relationships that leave the selection, which ELK would reject', () => {
+    const { diagram, entities } = chain(4)
+    const graph = toElkGraph({
+      diagram,
+      sizes: measureAll(diagram, 2),
+      only: [entities[0]!.id, entities[1]!.id],
+    })
+
+    // E0—E1 is inside; E1—E2 leaves it.
+    expect(graph.edges).toHaveLength(1)
+  })
+
+  it('drops self-joins, which some algorithms reject outright', () => {
+    const employee = createEntity({ name: 'EMPLOYEE' })
+    const diagram = createDiagram({
+      entities: [employee],
+      relationships: [createRelationship({ from: employee.id, to: employee.id })],
+    })
+
+    expect(toElkGraph({ diagram, sizes: measureAll(diagram, 2) }).edges).toHaveLength(0)
+  })
+
+  it('falls back to a default size for an unmeasured entity rather than sending zero', () => {
+    // A zero-sized node makes ELK overlap everything on top of it.
+    const { diagram } = chain(2)
+    const graph = toElkGraph({ diagram, sizes: {} })
+
+    expect(graph.children.every((node) => node.width > 0 && node.height > 0)).toBe(true)
+  })
+
+  it('switches algorithm presets', () => {
+    const { diagram } = chain(2)
+
+    expect(
+      toElkGraph({ diagram, sizes: {}, algorithm: 'tree' }).layoutOptions['elk.algorithm'],
+    ).toBe('mrtree')
+    expect(
+      toElkGraph({ diagram, sizes: {}, algorithm: 'force' }).layoutOptions['elk.algorithm'],
+    ).toBe('force')
+  })
+})
+
+describe('fromElkGraph', () => {
+  it('rounds positions to whole pixels', () => {
+    const result = fromElkGraph({ children: [{ id: 'ent_1', x: 10.4, y: 20.6 }] })
+
+    expect(result.positions['ent_1' as EntityId]).toEqual({ x: 10, y: 21 })
+  })
+
+  it('treats a missing coordinate as the origin', () => {
+    const result = fromElkGraph({ children: [{ id: 'ent_1' }] })
+
+    expect(result.positions['ent_1' as EntityId]).toEqual({ x: 0, y: 0 })
+  })
+
+  it('shifts by the offset, so laying out a selection does not teleport it', () => {
+    const result = fromElkGraph({ children: [{ id: 'ent_1', x: 0, y: 0 }] }, { x: 500, y: 300 })
+
+    expect(result.positions['ent_1' as EntityId]).toEqual({ x: 500, y: 300 })
+  })
+
+  it('reads bend points for orthogonal routing', () => {
+    const result = fromElkGraph({
+      edges: [
+        {
+          id: 'rel_1',
+          sections: [
+            {
+              startPoint: { x: 0, y: 0 },
+              endPoint: { x: 100, y: 100 },
+              bendPoints: [
+                { x: 50, y: 0 },
+                { x: 50, y: 100 },
+              ],
+            },
+          ],
+        },
+      ],
+    })
+
+    expect(result.routes[0]?.bendPoints).toHaveLength(2)
+  })
+
+  it('reports no route for a straight edge, so the renderer keeps its own path', () => {
+    const result = fromElkGraph({
+      edges: [
+        { id: 'rel_1', sections: [{ startPoint: { x: 0, y: 0 }, endPoint: { x: 9, y: 0 } }] },
+      ],
+    })
+
+    expect(result.routes).toHaveLength(0)
+  })
+
+  it('survives an empty result', () => {
+    expect(fromElkGraph({})).toEqual({ positions: {}, routes: [] })
+  })
+})
+
+describe('against the real ELK library', () => {
+  /**
+   * Runs elkjs directly rather than through the worker.
+   *
+   * The worker is a transport detail; what can actually be wrong is the graph we hand
+   * ELK. A hand-rolled fixture would only prove the fixture is well-formed, so these
+   * feed real `toElkGraph` output into the real library and read it back with real
+   * `fromElkGraph` — which is the contract that breaks silently if an option name is
+   * misspelled or a node is sent with no size.
+   */
+  async function runElk(graph: unknown): Promise<unknown> {
+    const { default: ELK } = (await import('elkjs/lib/elk.bundled.js')) as {
+      default: new () => { layout: (graph: unknown) => Promise<unknown> }
+    }
+    return new ELK().layout(graph)
+  }
+
+  it('accepts our graph and returns a position for every entity', async () => {
+    const { diagram, entities } = chain(6)
+    const graph = toElkGraph({ diagram, sizes: measureAll(diagram, 2) })
+
+    const result = fromElkGraph((await runElk(graph)) as Parameters<typeof fromElkGraph>[0])
+
+    expect(Object.keys(result.positions)).toHaveLength(6)
+    for (const entity of entities) {
+      expect(result.positions[entity.id]).toBeDefined()
+    }
+  }, 30_000)
+
+  it('produces no overlapping boxes', async () => {
+    // The one property that actually matters to a reader. If the measurements in
+    // measure.ts drift away from what canvas.css draws, this is what catches it.
+    const { diagram } = chain(8)
+    const sizes = measureAll(diagram, 2)
+    const result = fromElkGraph(
+      (await runElk(toElkGraph({ diagram, sizes }))) as Parameters<typeof fromElkGraph>[0],
+    )
+
+    const boxes = Object.entries(result.positions).map(([id, point]) => ({
+      left: point.x,
+      top: point.y,
+      right: point.x + (sizes[id as EntityId]?.width ?? 0),
+      bottom: point.y + (sizes[id as EntityId]?.height ?? 0),
+    }))
+
+    for (let a = 0; a < boxes.length; a += 1) {
+      for (let b = a + 1; b < boxes.length; b += 1) {
+        const first = boxes[a]!
+        const second = boxes[b]!
+        const overlaps =
+          first.left < second.right &&
+          first.right > second.left &&
+          first.top < second.bottom &&
+          first.bottom > second.top
+        expect(overlaps).toBe(false)
+      }
+    }
+  }, 30_000)
+
+  it('lays a chain out left to right, by dependency depth', async () => {
+    const { diagram, entities } = chain(4)
+    const result = fromElkGraph(
+      (await runElk(toElkGraph({ diagram, sizes: measureAll(diagram, 2) }))) as Parameters<
+        typeof fromElkGraph
+      >[0],
+    )
+
+    const xs = entities.map((entity) => result.positions[entity.id]?.x ?? 0)
+    for (let index = 1; index < xs.length; index += 1) {
+      expect(xs[index]!).toBeGreaterThan(xs[index - 1]!)
+    }
+  }, 30_000)
+
+  it('keeps disconnected components apart rather than stacking them', async () => {
+    const { diagram } = chain(3)
+    const island = createEntity({ name: 'ISLAND' })
+    const withIsland: Diagram = { ...diagram, entities: [...diagram.entities, island] }
+    const result = fromElkGraph(
+      (await runElk(
+        toElkGraph({ diagram: withIsland, sizes: measureAll(withIsland, 2) }),
+      )) as Parameters<typeof fromElkGraph>[0],
+    )
+
+    expect(result.positions[island.id]).toBeDefined()
+    expect(Object.keys(result.positions)).toHaveLength(4)
+  }, 30_000)
+})

@@ -1,0 +1,104 @@
+/* Colour, spacing and type scale.
+ *
+ * Direction: a drafting instrument. Graphite linework on cool paper, with one saturated
+ * signal colour held in reserve for the traced relationship (FR-4.1). The palette is
+ * deliberately low-chroma everywhere else — at 120 entities the screen is mostly text,
+ * and every extra hue competes with the content for attention.
+ *
+ * Contrast targets: text >= 4.5:1, graphical objects >= 3:1, at every zoom (NFR-4.5).
+ * Colour never carries meaning alone; every colour-coded state also has a shape, glyph
+ * or weight cue (NFR-4.4).
+ */
+
+:root {
+  /* ── Surface ─────────────────────────────────────────────────────────── */
+  --erd-paper: #eef1f4;
+  --erd-grid: #dde3e9;
+  --erd-panel: #ffffff;
+  --erd-node: #ffffff;
+  --erd-node-header: #f4f6f8;
+
+  /* ── Ink ─────────────────────────────────────────────────────────────── */
+  --erd-ink: #1b242f;
+  /* Darkened. `faint` in particular was failing 4.5:1 against the node fill at small
+   * sizes, which is where data types and badges live (NFR-4.5). */
+  --erd-ink-muted: #4a5764;
+  --erd-ink-faint: #6b7885;
+  --erd-rule: #b4c0cc;
+  --erd-rule-strong: #71818f;
+
+  /* ── Signal. Reserved for the traced path; nothing decorative uses it. ── */
+  --erd-signal: #1a56db;
+  --erd-signal-wash: #e7eefc;
+
+  --erd-danger: #a4262c;
+  --erd-warning: #8a5300;
+
+  /* ── Dimming, the other half of the hover treatment ──────────────────── */
+  /* Raised from 0.28. At that level the un-traced tables were nearly erased, which
+   * defeats the purpose: you trace a relationship in order to see it IN CONTEXT, and
+   * context you cannot read is not context. The contrast now comes mostly from the
+   * emphasis side — thicker stroke, stronger outline, signal colour — rather than from
+   * pushing everything else out of view. */
+  --erd-dim-opacity: 0.55;
+  /* Minimap mask: covers everything outside the viewport rectangle. */
+  --erd-minimap-mask: rgb(30 41 59 / 12%);
+
+  /* ── Type ────────────────────────────────────────────────────────────── */
+  /* System faces only: the app must work fully offline after first load
+   * (NFR-5.3), which rules out a webfont. The stack is ordered to prefer each
+   * platform's variable UI face. */
+  --erd-font-ui:
+    'Segoe UI Variable Text', 'SF Pro Text', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', sans-serif;
+  /* Monospace is used for data types only, where fixed advance width makes
+   * varchar(255) and numeric(10,2) scan as a column. It is not used for labels. */
+  --erd-font-mono:
+    'SF Mono', 'Cascadia Mono', 'JetBrains Mono', 'Roboto Mono', ui-monospace, monospace;
+
+  /* Bumped one step across the board. 13px body with 11px badges is tight for something
+   * read for hours, and the diagram is almost entirely text. */
+  --erd-text-xs: 0.75rem;
+  --erd-text-sm: 0.875rem;
+  --erd-text-base: 1rem;
+  --erd-text-lg: 1.1875rem;
+
+  /* ── Space. A 4px base; nodes align to an 8px grid so ELK's orthogonal
+   *    routing lands on whole pixels. ─────────────────────────────────── */
+  --erd-space-1: 0.25rem;
+  --erd-space-2: 0.5rem;
+  --erd-space-3: 0.75rem;
+  --erd-space-4: 1rem;
+  --erd-space-6: 1.5rem;
+
+  --erd-radius: 3px;
+  --erd-radius-panel: 6px;
+
+  /* Elevation is used once, on the traced path. Uniform card shadows would
+   * flatten the hierarchy the highlight depends on. */
+  --erd-lift: 0 2px 10px rgb(26 86 219 / 22%);
+}
+
+:root[data-theme='dark'] {
+  --erd-paper: #12161b;
+  --erd-grid: #1c222a;
+  --erd-panel: #181d24;
+  --erd-node: #1b212a;
+  --erd-node-header: #222a34;
+
+  --erd-ink: #e4e9ef;
+  --erd-ink-muted: #9aa7b5;
+  --erd-ink-faint: #6d7b8a;
+  --erd-rule: #333d49;
+  --erd-rule-strong: #55636f;
+
+  --erd-signal: #6f9dff;
+  --erd-signal-wash: #1d2a44;
+
+  --erd-danger: #ff8a8a;
+  --erd-warning: #e0a955;
+
+  --erd-dim-opacity: 0.45;
+  --erd-minimap-mask: rgb(0 0 0 / 45%);
+  --erd-lift: 0 2px 12px rgb(111 157 255 / 28%);
+}

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.test.tsbuildinfo",
+    // Tests run under Node (ESLint API, fs) and in jsdom. The app project deliberately
+    // gets neither, so a src file that reaches for `process` still fails there — this
+    // project widening the lib does not weaken that guarantee.
+    "types": ["node", "vite/client"]
+  },
+  // `src` is included, not merely imported: a project must list every file it pulls in
+  // (TS6307). The alternative — project references — needs `composite`, which does not
+  // combine cleanly with the `--noEmit` build used here.
+  "include": ["tests", "src"]
+}

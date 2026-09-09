@@ -1,0 +1,7 @@
+# Generated output — never hand-edited, and formatting it is pure noise.
+dist
+coverage
+playwright-report
+test-results
+node_modules
+pnpm-lock.yaml

@@ -1,0 +1,413 @@
+@import 'tailwindcss';
+@import '@xyflow/react/dist/style.css';
+@import './ui/theme/tokens.css';
+@import './ui/theme/notation-tokens.css';
+@import './render/reactflow/canvas.css';
+@import './features/inspector/inspector.css';
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--erd-font-ui);
+  color: var(--erd-ink);
+  background: var(--erd-paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Keyboard focus must stay visible everywhere (NFR-4.6). Scoped to :focus-visible so a
+ * pointer click does not leave a ring behind. */
+:focus-visible {
+  outline: 2px solid var(--erd-signal);
+  outline-offset: 2px;
+}
+
+/* React Flow paints its own surface; hand it ours. */
+.react-flow {
+  background: var(--erd-paper);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+/* ── Application shell ───────────────────────────────────────────────────── */
+
+.erd-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.erd-main {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+}
+
+.erd-boot,
+.erd-banner {
+  padding: var(--erd-space-3) var(--erd-space-4);
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink-muted);
+}
+
+.erd-banner {
+  background: var(--erd-signal-wash);
+  color: var(--erd-ink);
+  border-bottom: 1px solid var(--erd-rule);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+
+.erd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--erd-space-4);
+  padding: var(--erd-space-2) var(--erd-space-3);
+  background: var(--erd-panel);
+  border-bottom: 1px solid var(--erd-rule);
+  flex-wrap: wrap;
+}
+
+.erd-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--erd-space-2);
+}
+
+.erd-toolbar__group--end {
+  margin-left: auto;
+  gap: var(--erd-space-4);
+}
+
+.erd-toolbar__title {
+  margin: 0;
+  font-size: var(--erd-text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.erd-btn {
+  font: inherit;
+  font-size: var(--erd-text-sm);
+  padding: var(--erd-space-1) var(--erd-space-3);
+  color: var(--erd-ink);
+  background: var(--erd-panel);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius);
+  cursor: pointer;
+}
+
+.erd-btn:hover:not(:disabled) {
+  background: var(--erd-node-header);
+}
+
+.erd-btn:disabled {
+  color: var(--erd-ink-faint);
+  border-color: var(--erd-rule);
+  cursor: not-allowed;
+}
+
+.erd-btn--primary {
+  background: var(--erd-signal);
+  border-color: var(--erd-signal);
+  color: #fff;
+}
+
+.erd-btn--primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+  background: var(--erd-signal);
+}
+
+.erd-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--erd-space-2);
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink-muted);
+}
+
+.erd-select {
+  font: inherit;
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink);
+  background: var(--erd-panel);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius);
+  padding: 2px var(--erd-space-2);
+}
+
+.erd-status {
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+}
+
+.erd-status[data-dirty] {
+  color: var(--erd-ink-muted);
+}
+
+.erd-status--error {
+  color: var(--erd-danger);
+}
+
+/* ── Empty state ─────────────────────────────────────────────────────────── */
+
+.erd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--erd-space-3);
+  height: 100%;
+  max-width: 46ch;
+  margin: 0 auto;
+  padding: var(--erd-space-6);
+}
+
+.erd-empty__lead {
+  margin: 0;
+  font-size: var(--erd-text-lg);
+  font-weight: 600;
+}
+
+.erd-empty__body {
+  margin: 0;
+  color: var(--erd-ink-muted);
+  font-size: var(--erd-text-sm);
+  line-height: 1.6;
+}
+
+.erd-empty__actions {
+  display: flex;
+  gap: var(--erd-space-2);
+  margin-top: var(--erd-space-2);
+}
+
+/* Screen-reader-only. Used for the page heading, whose space the toolbar gives to the
+   diagram's own title instead. */
+.erd-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ── Diagram menu ────────────────────────────────────────────────────────── */
+
+.erd-diagrammenu {
+  position: relative;
+}
+
+.erd-diagrammenu__trigger {
+  display: flex;
+  align-items: baseline;
+  gap: var(--erd-space-2);
+  font: inherit;
+  font-size: var(--erd-text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--erd-ink);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--erd-radius);
+  padding: var(--erd-space-1) var(--erd-space-2);
+  cursor: pointer;
+  max-width: 22ch;
+}
+
+.erd-diagrammenu__trigger:hover,
+.erd-diagrammenu__trigger[aria-expanded='true'] {
+  background: var(--erd-node-header);
+  border-color: var(--erd-rule);
+}
+
+.erd-diagrammenu__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erd-diagrammenu__caret {
+  color: var(--erd-ink-faint);
+  font-size: var(--erd-text-xs);
+}
+
+.erd-diagrammenu__panel {
+  position: absolute;
+  top: calc(100% + var(--erd-space-1));
+  left: 0;
+  z-index: 20;
+  width: 320px;
+  max-height: 70vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-3);
+  padding: var(--erd-space-3);
+  background: var(--erd-panel);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius-panel);
+  box-shadow: 0 8px 24px rgb(27 36 47 / 12%);
+}
+
+.erd-diagrammenu__list h3 {
+  margin: 0 0 var(--erd-space-2);
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+}
+
+.erd-diagrammenu__row {
+  display: flex;
+  align-items: center;
+  gap: var(--erd-space-1);
+}
+
+.erd-diagrammenu__row .erd-fieldlist__item {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Modal ───────────────────────────────────────────────────────────────── */
+
+.erd-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: var(--erd-space-4);
+  background: rgb(27 36 47 / 32%);
+}
+
+.erd-modal__panel {
+  width: min(720px, 100%);
+  max-height: 88vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-3);
+  padding: var(--erd-space-4);
+  background: var(--erd-panel);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius-panel);
+  box-shadow: 0 12px 40px rgb(27 36 47 / 22%);
+}
+
+.erd-modal__head,
+.erd-modal__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--erd-space-2);
+}
+
+.erd-modal__foot {
+  justify-content: flex-end;
+}
+
+.erd-modal__head h2 {
+  margin: 0;
+  font-size: var(--erd-text-lg);
+}
+
+/* ── Export ──────────────────────────────────────────────────────────────── */
+
+.erd-export__preview {
+  font-family: var(--erd-font-mono);
+  font-size: var(--erd-text-xs);
+  line-height: 1.55;
+  color: var(--erd-ink);
+  background: var(--erd-node-header);
+  border: 1px solid var(--erd-rule);
+  border-radius: var(--erd-radius);
+  padding: var(--erd-space-2);
+  resize: vertical;
+  white-space: pre;
+  overflow-wrap: normal;
+  overflow-x: auto;
+}
+
+.erd-export__lossless {
+  margin: 0;
+  color: var(--erd-ink-muted);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-export__loss h3 {
+  margin: 0 0 var(--erd-space-2);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-export__loss ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-2);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-export__loss li {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: var(--erd-space-1) var(--erd-space-2);
+  padding: var(--erd-space-2);
+  background: var(--erd-node-header);
+  border-radius: var(--erd-radius);
+  border-left: 3px solid var(--erd-rule-strong);
+}
+
+/* "Not exported" is the only one that loses information outright, so it is the only one
+   that gets the warning colour. Colouring all three would make none of them stand out. */
+.erd-export__loss li[data-treatment='dropped'] {
+  border-left-color: var(--erd-warning);
+}
+
+.erd-export__treatment {
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+}
+
+.erd-export__affected {
+  grid-column: 2;
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+}
+
+.erd-modal__panel--narrow {
+  width: min(520px, 100%);
+}
+
+.erd-import__error {
+  margin: 0;
+  padding: var(--erd-space-2);
+  font-size: var(--erd-text-sm);
+  color: var(--erd-danger);
+  background: color-mix(in srgb, var(--erd-danger) 8%, transparent);
+  border-radius: var(--erd-radius);
+}
+
+.erd-import__warnings h3 {
+  margin: 0 0 var(--erd-space-1);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-import__warnings ul {
+  margin: 0;
+  padding-left: var(--erd-space-4);
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink-muted);
+  line-height: 1.5;
+}

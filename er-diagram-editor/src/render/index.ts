@@ -1,0 +1,17 @@
+// Public surface of the render layer.
+
+export { Canvas, type CanvasProps } from './reactflow/Canvas'
+export {
+  EditorActionsProvider,
+  useEditorActions,
+  type EditorActions,
+} from './reactflow/EditorActions'
+export { fallbackPosition, traceSets, type TraceSets } from './reactflow/trace'
+export { EntityNode, type EntityNodeData } from './reactflow/nodes/EntityNode'
+export { AttributeRow } from './reactflow/nodes/AttributeRow'
+export { RelationshipEdge, type RelationshipEdgeData } from './reactflow/edges/RelationshipEdge'
+export { readRelationship } from './reactflow/edges/readRelationship'
+export { CrowsFootMarkers, tracedMarkerId } from './reactflow/edges/endpoints'
+export { effectiveLod, entityLod, lodForZoom, type LodLevel } from './lod'
+export { compactNotation, compactBadges, describeEnd, markerFor } from './notation/compact'
+export type { AttributeBadge, NotationSet } from './notation/NotationSet'

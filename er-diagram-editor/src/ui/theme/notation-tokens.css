@@ -1,0 +1,33 @@
+/* Stroke weights, glyph sizes and highlight behaviour for the diagram itself.
+ *
+ * Split from tokens.css because these are notation decisions, not brand ones: a second
+ * notation set (Chen, Barker) would replace this file and leave the palette alone.
+ */
+
+:root {
+  /* Thickened. A 1.25px line at 90% zoom on a high-DPI display is barely a hairline,
+   * and connectors are the thing the eye follows. */
+  --erd-stroke: 1.6px;
+  --erd-stroke-strong: 2.25px;
+  /* The traced path. Thick enough to read over a dimmed field without becoming a
+   * different shape — the eye should follow the same line, not find a new one. */
+  --erd-stroke-trace: 3.25px;
+
+  /* Weak entity: a second border inset from the first (FR-5.1). */
+  --erd-weak-inset: 3px;
+
+  --erd-crowsfoot: 12px;
+  --erd-badge-size: 0.75rem;
+
+  /* 120ms: fast enough to feel attached to the pointer, slow enough that crossing
+   * several connectors does not strobe. FR-4.1 caps this at 150ms. */
+  --erd-trace-duration: 120ms;
+}
+
+/* NFR-4.3: all motion is suppressed, not merely shortened. The highlight still
+ * applies — it just arrives instantly. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --erd-trace-duration: 0ms;
+  }
+}

@@ -1,0 +1,395 @@
+/* Diagram surface. Kept as plain CSS rather than utility classes because the hover
+ * treatment is driven by `data-` attributes on ancestors, which utility classes cannot
+ * express without a variant for every combination. */
+
+.erd-canvas {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+
+.erd-markers {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+/* ── Entity node ─────────────────────────────────────────────────────────── */
+
+.erd-node {
+  min-width: 160px;
+  max-width: 300px;
+  background: var(--erd-node);
+  border: var(--erd-stroke) solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius);
+  font-size: var(--erd-text-sm);
+  overflow: hidden;
+  /* A hairline at 100% zoom is a smudge at 40%. */
+  box-shadow: 0 1px 2px rgb(27 36 47 / 6%);
+  transition:
+    opacity var(--erd-trace-duration) ease-out,
+    border-color var(--erd-trace-duration) ease-out,
+    box-shadow var(--erd-trace-duration) ease-out;
+}
+
+/* Weak entity: a genuine second border, inset — the double rectangle of Chen notation
+   rather than a colour or a label (FR-5.1). */
+.erd-node[data-kind='weak'] {
+  box-shadow: inset 0 0 0 var(--erd-weak-inset) var(--erd-node);
+  border-width: var(--erd-stroke-strong);
+}
+
+.erd-node[data-lod='0'] {
+  min-width: 120px;
+}
+
+.erd-node__header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--erd-space-2);
+  padding: var(--erd-space-2) var(--erd-space-3);
+  background: var(--erd-node-header);
+  border-bottom: var(--erd-stroke) solid var(--erd-rule);
+}
+
+.erd-node[data-lod='0'] .erd-node__header {
+  border-bottom: none;
+}
+
+.erd-node__name {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--erd-ink);
+  overflow-wrap: anywhere;
+}
+
+.erd-node__kind {
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+  flex-shrink: 0;
+}
+
+.erd-node__attrs {
+  display: flex;
+  flex-direction: column;
+}
+
+.erd-node__more {
+  padding: var(--erd-space-1) var(--erd-space-3) var(--erd-space-2);
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+}
+
+/* ── Attribute row ───────────────────────────────────────────────────────── */
+
+.erd-attr {
+  position: relative;
+  display: flex;
+  align-items: baseline;
+  gap: var(--erd-space-2);
+  padding: 3px var(--erd-space-3);
+  line-height: 1.45;
+}
+
+.erd-attr + .erd-attr {
+  border-top: 1px solid color-mix(in srgb, var(--erd-rule) 45%, transparent);
+}
+
+.erd-attr__name {
+  color: var(--erd-ink);
+  overflow-wrap: anywhere;
+}
+
+/* Primary key: underlined, the standard ER cue. Survives greyscale (NFR-4.4). */
+.erd-attr__name[data-key] {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1.5px;
+}
+
+/* Derived: dashed underline, mirroring Chen's dashed oval. */
+.erd-attr__name[data-derived] {
+  text-decoration: underline dashed;
+  text-underline-offset: 3px;
+}
+
+.erd-attr__unnamed {
+  color: var(--erd-ink-faint);
+  font-style: italic;
+}
+
+/* Monospace here only. Fixed advance width makes a column of varchar(255) /
+   numeric(10,2) scan as a column rather than as prose. */
+.erd-attr__type {
+  margin-left: auto;
+  font-family: var(--erd-font-mono);
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+  white-space: nowrap;
+}
+
+.erd-attr__badges {
+  display: inline-flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.erd-badge {
+  font-size: var(--erd-badge-size);
+  font-weight: 600;
+  line-height: 1;
+  padding: 2px 3px;
+  border-radius: 2px;
+  text-decoration: none;
+  border: 1px solid transparent;
+}
+
+.erd-badge--key {
+  color: var(--erd-ink);
+  border-color: var(--erd-rule-strong);
+}
+
+.erd-badge--ref {
+  color: var(--erd-ink-muted);
+  border-color: var(--erd-rule);
+}
+
+.erd-badge--shape {
+  color: var(--erd-ink-muted);
+  font-size: 0.8125rem;
+  padding: 0 1px;
+}
+
+/* ── Handles ─────────────────────────────────────────────────────────────── */
+
+.erd-handle {
+  width: 10px;
+  height: 10px;
+  background: var(--erd-node);
+  border: 1.75px solid var(--erd-rule-strong);
+  transition:
+    opacity var(--erd-trace-duration) ease-out,
+    background var(--erd-trace-duration) ease-out,
+    border-color var(--erd-trace-duration) ease-out;
+}
+
+/* The grab area, three times the visible dot.
+ *
+ * A 10px target is a precision task on a trackpad, and starting a relationship should
+ * not be. The pseudo-element enlarges what the pointer can hit without enlarging what
+ * the eye has to look at — the dot stays small and quiet, the target is generous. */
+.erd-handle::after {
+  content: '';
+  position: absolute;
+  inset: -11px;
+  border-radius: 50%;
+}
+
+/* Per-row handles stay hidden until the box is hovered — one per field would be a
+   cloud of dots at rest. The box-level handles do NOT hide, because drag-to-connect is
+   the primary way to draw a relationship and an affordance nobody can see is an
+   affordance nobody uses. */
+.erd-attr .erd-handle {
+  opacity: 0;
+}
+
+.erd-node:hover .erd-attr .erd-handle {
+  opacity: 1;
+}
+
+.erd-handle--node {
+  background: var(--erd-paper);
+  border-color: var(--erd-rule-strong);
+}
+
+.erd-node:hover .erd-handle--node,
+.erd-handle:hover {
+  background: var(--erd-signal);
+  border-color: var(--erd-signal);
+  cursor: crosshair;
+}
+
+/* React Flow renders the in-flight connection line; give its endpoint the same
+   treatment so the gesture reads as one continuous thing. */
+.react-flow__connectionline path {
+  stroke: var(--erd-signal);
+}
+
+/* ── Edges ───────────────────────────────────────────────────────────────── */
+
+.erd-edge .react-flow__edge-path {
+  stroke: var(--erd-rule-strong);
+  stroke-width: var(--erd-stroke);
+  fill: none;
+  transition:
+    stroke var(--erd-trace-duration) ease-out,
+    stroke-width var(--erd-trace-duration) ease-out,
+    opacity var(--erd-trace-duration) ease-out;
+}
+
+/* Non-identifying relationships are dashed, matching Mermaid's `..` (FR-1.9). */
+.erd-edge:not([data-identifying]) .react-flow__edge-path {
+  stroke-dasharray: 5 3;
+}
+
+/* A wide invisible stroke over the visible one. Hovering a 1.25px line is unreasonably
+   fiddly; this gives the pointer a ~16px target without changing what is drawn. */
+.erd-edge__hit {
+  stroke: transparent;
+  stroke-width: 16;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.erd-edge__label {
+  position: absolute;
+  padding: 1px var(--erd-space-2);
+  background: var(--erd-paper);
+  color: var(--erd-ink-muted);
+  font-size: var(--erd-text-xs);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* ── The trace treatment (FR-4.1) ────────────────────────────────────────────
+ *
+ * Static emphasis plus dimming, deliberately not a blink. Flashing content is a
+ * WCAG 2.3.1 concern and a vestibular risk, and blinking makes the label you are
+ * hovering to read harder to read. Everything unrelated drops back; the traced
+ * path thickens, takes the one saturated colour in the palette, and lifts.
+ */
+
+.erd-node[data-dimmed],
+.erd-edge[data-dimmed] {
+  opacity: var(--erd-dim-opacity);
+}
+
+.erd-node[data-traced] {
+  border-color: var(--erd-signal);
+  border-width: var(--erd-stroke-strong);
+  box-shadow: var(--erd-lift);
+}
+
+/* Dimmed elements sit behind traced ones, so a traced connector crossing a dimmed box
+   stays readable rather than disappearing under it. */
+.react-flow__node:has(.erd-node[data-dimmed]) {
+  z-index: 0 !important;
+}
+
+.react-flow__node:has(.erd-node[data-traced]) {
+  z-index: 5 !important;
+}
+
+.erd-node[data-kind='weak'][data-traced] {
+  box-shadow:
+    inset 0 0 0 var(--erd-weak-inset) var(--erd-node),
+    var(--erd-lift);
+}
+
+.erd-edge[data-traced] .react-flow__edge-path {
+  stroke: var(--erd-signal);
+  stroke-width: var(--erd-stroke-trace);
+}
+
+/* A dimmed connector keeps more presence than a dimmed box: lines are thin to begin
+   with, so the same opacity erases them faster. */
+.erd-edge[data-dimmed] {
+  opacity: calc(var(--erd-dim-opacity) + 0.15);
+}
+
+.erd-edge[data-traced] .erd-edge__label {
+  color: var(--erd-ink);
+  background: var(--erd-signal-wash);
+}
+
+/* The FK row that participates in the traced connector (FR-4.5). */
+.erd-attr[data-traced] {
+  background: var(--erd-signal-wash);
+}
+
+/* Selection is a different state from tracing and must not borrow its colour, or a
+   selected node would look permanently hovered. */
+.react-flow__node.selected .erd-node {
+  border-color: var(--erd-ink);
+  border-width: var(--erd-stroke-strong);
+}
+
+/* ── Chrome ──────────────────────────────────────────────────────────────── */
+
+.erd-minimap {
+  background: var(--erd-panel);
+  border: 1px solid var(--erd-rule);
+  border-radius: var(--erd-radius);
+  /* React Flow's default is 200x150, which at 120 entities is a grey smear. Smaller and
+     further from the corner, so it reads as an instrument rather than a second canvas. */
+  width: 168px;
+  height: 116px;
+}
+
+.react-flow__minimap-mask {
+  /* Set via the maskColor prop, but the default rule carries higher specificity. */
+  stroke: none;
+}
+
+.react-flow__controls-button {
+  background: var(--erd-panel);
+  border-bottom: 1px solid var(--erd-rule);
+  fill: var(--erd-ink);
+}
+
+.react-flow__controls-button:hover {
+  background: var(--erd-node-header);
+}
+
+/* ── Inline editing on the canvas ────────────────────────────────────────── */
+
+.erd-inline-input {
+  font: inherit;
+  color: var(--erd-ink);
+  background: var(--erd-signal-wash);
+  border: 1px solid var(--erd-signal);
+  border-radius: 2px;
+  padding: 0 3px;
+  width: 100%;
+  min-width: 0;
+}
+
+.erd-node__name[role='button'],
+.erd-attr__name[role='button'] {
+  cursor: text;
+}
+
+/* Nullable marker. Muted so a column of them recedes — the reader is scanning names and
+   types, and the `?` is a detail they look for rather than one that should announce
+   itself. */
+.erd-attr__nullable {
+  color: var(--erd-ink-faint);
+  margin-left: 1px;
+}
+
+.erd-attr[data-selected] {
+  background: var(--erd-node-header);
+  box-shadow: inset 2px 0 0 var(--erd-signal);
+}
+
+.erd-node__add {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: var(--erd-text-xs);
+  text-align: left;
+  padding: var(--erd-space-1) var(--erd-space-3);
+  color: var(--erd-ink-faint);
+  background: transparent;
+  border: none;
+  border-top: 1px dashed var(--erd-rule);
+  cursor: pointer;
+}
+
+.erd-node__add:hover {
+  color: var(--erd-signal);
+  background: var(--erd-signal-wash);
+}
