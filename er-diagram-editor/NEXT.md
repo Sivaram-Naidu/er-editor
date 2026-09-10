@@ -64,16 +64,45 @@ Both dev and `vite preview` of the production build.
 | Entry bundle still under budget | 718,191 B raw / **222,462 B gzip** (was 717,768 / 222,275). Budget 500 KB. Zero GWT fingerprints (`gwtOnLoad`, `$wnd`) in the entry chunk.                                                                            |
 | Production build, not just dev  | Every row above re-run against `vite preview`. Layout took ~1.06 s end to end, including the 1.6 MB worker fetch.                                                                                                     |
 
+### Verified in a real browser (Chrome, 10 Sep 2026 — real-schema session)
+
+| Thing                                                | Evidence                                                                                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pagila, 71 tables of real third-party PostgreSQL DDL | Imports to 72 entities / 36 relationships. **Zero** import warnings, alerts, console errors. **Zero overlapping boxes at L0, L1 and L2.** Layout 354 / 346 / 573 ms.                |
+| NFR-1.4 timing at 120 entities                       | **606 ms (L0), 370 ms (L1), 945 ms (L2)** against a 5 s budget. Consistent with the ~840 ms `test:perf` reports in-process, so the algorithm figure was honest.                     |
+| NFR-1.4's 50 ms main-thread clause                   | **Violated.** A `longtask` observer records blocks of **323 ms (L0), 142 ms (L1), 473 ms (L2)** — 9.5x the limit. ELK is genuinely off-thread; the blocking is ours.                |
+| 120 identical tables, laid out                       | Clean grid, no overlaps, minimap populated, edges routed. Screenshot looked at — and this is exactly why the synthetic fixture proves nothing.                                      |
+| 41 tables with realistic names                       | Every rendered box taller than `measure.ts` predicted, worst by **586 px (86%)**; **26 overlapping pairs**, worst 300x530 px.                                                       |
+| Hub-and-spoke at L2                                  | 40 tables onto one hub renders as a single vertical ribbon, ~1,000 px wide by ~40,000 px tall. Screenshot looked at: unreadable at any zoom.                                        |
+| The `.erd.json` fixtures                             | `reference.erd.json` / `stress.erd.json` / `small.erd.json` are empty **and invalid** — no top-level `id`, so importing one is rejected. Their README claimed 120 and 300 entities. |
+
 ### Known broken
 
-1. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+1. **`measure.ts` under-measures every box whose column names wrap, and boxes overlap as
+   a result.** The estimate bills each attribute row at a flat `rowHeight: 26`, but
+   `canvas.css` sets `overflow-wrap: anywhere` on `.erd-attr__name` under
+   `.erd-node { max-width: 300px }`, so a long name wraps to two or three lines and the row
+   grows. ELK is told the box is shorter than it is and stacks boxes on top of each other.
+   Measured: worst box 586 px (86%) under, 26 overlapping pairs on 41 tables. Reproduction
+   and the fix decision are in Tier 1 item 1.
+2. **A hub-and-spoke schema is unusable at L2.** 40 tables referencing one hub all land in
+   a single ELK layer, giving a diagram ~1,000 px wide and ~40,000 px tall — a vertical
+   ribbon, unreadable at every zoom. This is the ordinary shape of a warehouse or any
+   schema with a `users` table, and NFR-2.2's "usable up to 300 entities" says nothing
+   about it because it counts entities rather than looking at shape. Tier 1 item 2.
+3. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
+   473 ms, even though ELK now genuinely runs in a worker. The block is on our side of the
+   boundary: applying 120 positions is one Immer pass plus patch derivation plus a store
+   publish plus revalidation, and then React commits 120 nodes and 150 edges at once.
+   Tier 1 item 3.
+4. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
-2. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+5. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-3. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
-   overlay minimap, but combined with 2 a good deal of the canvas is unreachable. See
+6. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 5 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
 Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
@@ -97,9 +126,10 @@ Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without 
 
 - 697 unit tests in 29 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
   lines against an 80% gate.
-- **15 e2e specs in 2 files, ~40s, all passing.** No `test.fail()` markers left. `pnpm
-test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
-  download is needed.
+- **16 e2e specs in 3 files, ~40s.** 15 pass; `tests/e2e/measurement.spec.ts` is marked
+  `test.fail()` because the defect it asserts is real and unfixed — Playwright turns the
+  suite red if it starts passing. `pnpm test:e2e` is part of `pnpm verify`, and the config
+  uses `channel: 'chrome'` so no browser download is needed.
 - Bundle 718 kB raw, 222 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
   inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
   only, never at boot.
@@ -116,7 +146,11 @@ The bet is sound; the tool is not yet. Three things are genuinely differentiated
 protecting:
 
 - **Large schemas.** LOD + viewport culling + hover-tracing is a real answer to a real
-  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first.
+  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first. **Now
+  partly evidenced and partly dented** (10 Sep 2026): 120 tables lay out cleanly in under a
+  second in Chrome, and a real 71-table dump imports with no overlaps at all — but give it
+  realistic column names and boxes overlap, and give it one hub with 40 dependents and the
+  result is an unreadable ribbon. Tier 1 items 1 and 2.
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
 - **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
@@ -184,38 +218,99 @@ almost entirely into the layers a unit test can reach.
 
 ---
 
-## Tier 1 — find out whether it works on real data
+## Tier 1 — what running it on real data found
 
-The name of this tier changed on 10 Sep 2026, and the change is the point. It used to be
-"make it work at all", because clicking a table did not select it, the minimap was blank and
-auto-layout threw. Those are fixed and verified in Chrome. What is left is not a bug list —
-it is that every claim in this repository about behaviour at scale still rests on synthetic
-fixtures.
+The name of this tier has changed twice, and the changes are the record. It was "make it
+work at all" while clicking a table did nothing, the minimap was blank and auto-layout
+threw. It became "find out whether it works on real data" once those were fixed. That
+investigation has now run — a real 71-table PostgreSQL dump and a schema shaped like an
+enterprise warehouse — and items 1 to 3 below are what it found. Two of the three are
+things no count-based benchmark would ever have surfaced.
 
-### 1. Run one real schema through it
+What it also established, and is worth not re-deriving: 120 tables lay out in under a second
+in Chrome, a real dump imports with no overlaps at all, and the ~840 ms the perf suite
+reports in-process was an honest number. The tool is not slow. It is wrong about the size of
+its own boxes, and indifferent to the shape of the graph.
 
-Now unblocked, and the highest-value thing left. Auto-layout works, so an imported dump
-finally shows a layout rather than the placeholder grid.
+### 1. Make `measure.ts` tell ELK the truth about wrapped rows
 
-`docs/SRS.md` §13.1 already admits every performance figure comes from synthetic fixtures
-with uniform table sizes and tidy relationships. A real dump — 60-column tables, 200 foreign
-keys into one table, names like `tbl_cust_hist_2019` — will teach more in five minutes than
-another week of synthetic testing. The width estimates in `measure.ts` are exactly the kind
-of thing it should break, and there is a no-overlap test that will say so.
+**Already established — do not redo this:**
 
-Two numbers to collect while you are in there, because neither has ever been measured in a
-browser:
+- `measure.ts` bills every attribute row at `rowHeight: 26`. `canvas.css` sets
+  `overflow-wrap: anywhere` on `.erd-attr__name` and `.erd-attr__type { white-space: nowrap }`
+  inside `.erd-node { max-width: 300px }`. So once a name plus its type exceeds the cap the
+  name wraps, the row becomes ~52–78 px, and the flat 26 px is wrong by multiples.
+- Measured on 41 tables with realistic names, at L2: **every** rendered box taller than
+  predicted, the worst 1270 px against a predicted 684 px — **586 px, 86% under**. **26
+  overlapping pairs**, the worst overlapping by 300x530 px, i.e. entirely covering.
+- The header is 38 px, not the 36 px `METRICS.headerHeight` claims. Small, but the same
+  kind of drift.
+- Two other constants disagree with the stylesheet, both harmlessly: `measure.ts` says
+  `maxWidth: 320` where CSS says 300, and `minWidth: 168` where CSS says 160 (120 at L0).
+  Those err generous, which is the safe direction the file's own comment describes.
+- **The no-overlap unit test cannot catch any of this, and its comment says it can.**
+  `tests/unit/layout/layout.test.ts` feeds `measureAll` output to ELK and then checks for
+  overlap using _that same output_, so it asserts only that ELK honoured the sizes it was
+  given. Nor can any unit test: jsdom performs no layout, so there is no rendered height to
+  disagree with. `tests/e2e/measurement.spec.ts` is the replacement and it fails today, on
+  purpose: `dim_cust_master_hist_2019: measure.ts says 216px tall, the browser draws 333px`.
 
-- **NFR-1.4 at scale.** The 120-entity reference schema has never been laid out in Chrome.
-  The ~840 ms on record is `pnpm test:perf` calling ELK in-process on the test thread. The
-  four-entity sample takes ~1.06 s end to end in the browser, but that is almost entirely
-  worker fetch and GWT init, so it says nothing about 120 tables. Lay out 120 and record it.
-- **Whether the main thread actually stays free.** It is genuinely a worker now, so it
-  should be — but NFR-1.4 says "never blocks for more than 50 ms at a time" and nobody has
-  looked at a long-task trace. `postMessage` of a large graph is itself a main-thread cost,
-  and so is applying the result through the command stack.
+**The decision to make first.** Two shapes of fix, and they look different on screen:
 
-### 2. Search and command palette (FR-2.6, FR-9.2)
+- **Teach the estimate to wrap.** Compute the width left for the name after the type and
+  badges, divide, and add a line's height per extra line. Nothing about the rendering
+  changes — boxes stay as tall as they are and ELK simply stops being lied to. Roughly ten
+  lines in `measureEntity`. It does not help item 2: tall boxes are what makes the ribbon.
+- **Stop names wrapping.** `white-space: nowrap; text-overflow: ellipsis` on
+  `.erd-attr__name`, with the full name in a `title`. Every row is 26 px again, so the
+  existing estimate becomes correct and boxes get shorter and more uniform — which also
+  softens item 2. The cost is that a 50-character column name is only readable on hover,
+  and this tool's whole claim is legibility at scale.
+
+Recommend the second, with the first as a follow-up for the header and the 320/300 drift:
+a diagram where one table is 3,000 px tall is not legible whatever ELK does with it, so
+truncating is the fix that serves the product rather than only the arithmetic. But it is a
+visible change to how every table reads, so it wants agreeing first.
+
+Whichever, `tests/e2e/measurement.spec.ts` is the acceptance test — drop its `test.fail()`
+as part of the change. Reproduction: `tests/fixtures/wide-names.sql`.
+
+### 2. Lay out a hub-and-spoke schema so it is readable
+
+40 tables all referencing one hub produce a single ELK layer: a diagram roughly 1,000 px
+wide and 40,000 px tall, unreadable at any zoom. Screenshot evidence is in the browser table
+above. This is not an exotic shape — it is every warehouse fact table, and every schema with
+a `users` table that half the others point at. NEXT.md has been claiming "large schemas" as
+one of three differentiators, and this is the shape that claim has to survive.
+
+Undiagnosed beyond the observation. Things worth trying, cheapest first:
+
+- `elk.layered.nodePlacement.strategy` and `elk.aspectRatio` — ELK takes a target aspect
+  ratio and is currently not given one.
+- Splitting a high-degree hub across layers, or `elk.layered.wrapping.strategy`, which
+  exists for exactly this and is not set in `options.ts`.
+- Whether `force` or `mrtree` (both already in `options.ts` and reachable via
+  `LayoutAlgorithm`) do better on this shape, and whether the algorithm should be chosen
+  from the graph rather than by the user.
+- Item 1 interacts: shorter boxes make any layer shorter, so do these in that order.
+
+### 3. Stop the main thread blocking for 473 ms when a layout lands
+
+NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". Measured in
+Chrome on the 120-entity reference schema: blocks of **323 ms at L0, 142 ms at L1 and 473 ms
+at L2**. ELK is genuinely in a worker now, so none of this is the algorithm — it is
+everything that happens when the result comes back:
+
+- `applyLayout` is one command over 120 positions: an Immer pass, patch derivation for the
+  undo inverse, a store publish, then revalidation of the whole diagram.
+- React then commits 120 nodes and 150 edges in a single render.
+
+Both are plausibly the whole 473 ms and neither has been profiled — do that before choosing
+between them. The obvious levers are chunking the commit, `startTransition` around the
+apply, or keeping revalidation off the layout path. Note that NFR-1.3's 100 ms interaction
+budget has never been measured in a browser either, and probably fails on the same path.
+
+### 4. Search and command palette (FR-2.6, FR-9.2)
 
 Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
 reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
@@ -225,7 +320,7 @@ match over a hundred table names does not need a fuzzy-search library.
 
 ## Tier 2 — make it actually useful
 
-### 3. Re-import onto an existing diagram, preserving layout
+### 5. Re-import onto an existing diagram, preserving layout
 
 The item that changes what the tool is. Import currently replaces the document wholesale.
 What is needed: import a `.sql` or `.mmd` over the _current_ diagram, match entities by
@@ -241,10 +336,10 @@ applied.
 
 In order:
 
-4. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+6. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-5. **Stop rebuilding every node object on hover.** The performance half of the
+7. **Stop rebuilding every node object on hover.** The performance half of the
    click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
    split-store note already promises ("hover is separated _so that_ it does not re-render
    every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
@@ -254,7 +349,7 @@ In order:
    `EntityNode` subscribe to trace state by its own id instead of receiving it in
    `node.data`. Measure first: at four entities it is free, and the cost has never been
    measured at scale.
-6. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+8. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.
@@ -276,6 +371,14 @@ In order:
 ---
 
 ## Housekeeping worth doing while nearby
+
+- **The three `.erd.json` fixtures are empty and invalid, and want deleting or
+  populating.** `tests/fixtures/README.md` described `reference.erd.json` as 120 entities
+  used by "all NFR-1.x performance budgets"; it has none, and no top-level `id`, so
+  importing it is rejected outright. Nothing reads any of them — the budgets come from
+  `referenceSchema()` inside `tests/perf/layout.perf.test.ts`. The README now says so, but
+  the files are still there. Either populate them from that generator, or delete them and
+  point the README at the generator.
 
 - **~~The SRS status table is stale on FR-8.1/FR-8.2.~~ Done** — those rows and §13 now read
   correctly. The auto-layout rows (FR-3.1, FR-3.2, FR-3.4, FR-6.8, NFR-1.4) were corrected
@@ -365,6 +468,29 @@ Driving it:
   `window`, rather than reading the DOM from the driver after a `waitForTimeout`.
 - **Look at the image.** Every image-export bug found produced a valid file of the right
   size with the right background colour. Byte counts and dimensions prove nothing.
+
+Loading a schema of your own:
+
+- **`importFile` in `tests/e2e/helpers.ts` takes a filename and a string**, deletes
+  `showOpenFilePicker` so Playwright can drive the `<input type="file">` fallback, and
+  clicks through the dialog. A driver script can do the same with
+  `fc.setFiles({ name, mimeType, buffer })` — no temp file needed.
+- **A `.erd.json` needs `id`, `createdAt` and `updatedAt`** at the top level as well as
+  `entities`/`relationships`, or the import is rejected. The checked-in fixtures do not have
+  them.
+- **Measure boxes with `offsetWidth`/`offsetHeight`, not `getBoundingClientRect`.** Nodes
+  sit inside React Flow's scaled viewport, so the client rect is screen pixels while
+  `offset*` is the pre-transform layout size — the same unit ELK and `measure.ts` work in.
+  Positions come from `style.transform`, which is also pre-scale.
+- **Culling breaks any "count all the boxes" measurement.** `onlyRenderVisibleElements`
+  means off-screen nodes are absent from the DOM, so an overlap sweep sees only what is
+  framed — 7 of 41 before fitting the view, 25 after. Click
+  `.react-flow__controls-fitview` and use a tall window, and treat the count as a floor.
+- **Pin the detail level before measuring.** Box heights depend on the LOD the layout ran
+  at, and LOD follows zoom unless the Detail select is set explicitly.
+- **For main-thread blocking, use a `longtask` PerformanceObserver** inside the page. It
+  reports exactly what NFR-1.4 is worded against, which wall-clock timing around a click
+  does not.
 
 Interaction-specific, learned while fixing click-to-select:
 
