@@ -415,7 +415,12 @@ export function Editor(): React.ReactElement {
             closeDialog()
             // .mmd and .sql carry no coordinates, so an imported diagram would otherwise
             // land on the placeholder grid.
-            if (arrange) void autoLayout.run()
+            //
+            // `imported` is passed explicitly. `load` has updated the store by now, but
+            // `autoLayout.run` reads the `diagram` PROP, which is still the pre-import
+            // render's — so without this it arranges the document being replaced. See
+            // `UseAutoLayoutRequest`.
+            if (arrange) void autoLayout.run({ diagram: imported })
           }}
         />
       ) : null}

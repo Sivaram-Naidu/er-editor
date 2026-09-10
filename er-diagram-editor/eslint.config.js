@@ -64,7 +64,7 @@ const zones = LAYERS.flatMap((target) =>
 )
 
 export default tseslint.config([
-  globalIgnores(['dist', 'coverage', 'node_modules', 'public/elk-worker.js']),
+  globalIgnores(['dist', 'coverage', 'node_modules']),
   {
     files: ['**/*.{ts,tsx}'],
     extends: [js.configs.recommended, tseslint.configs.strictTypeChecked, prettier],

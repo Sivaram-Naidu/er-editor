@@ -166,10 +166,22 @@ culling off.
   it installs itself as the worker body and exports nothing. `new ELK()` then throws
   `_Worker is not a constructor` at worker module top level. Auto-layout has therefore never
   worked in a browser, in dev or in production, while `pnpm test:perf` happily measured the
-  algorithm in-process on the test thread. Let elkjs own the thread instead: main-thread
-  `new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })` with
-  `elk-worker.min.js?url`, as a **classic** worker — it is a browserify UMD bundle, so
-  `{ type: 'module' }` will not load it. See `NEXT.md` Tier 1.
+  algorithm in-process on the test thread. **Fixed 10 Sep 2026** by letting elkjs own the
+  thread: `elk-api.js` on the main thread driving `elk-worker.min.js` — imported with
+  Vite's `?url` — as a **classic** worker. It is a browserify script, not an ES module, so
+  `{ type: 'module' }` will not load it; `workerUrl` alone is enough, because elk-api's
+  default factory is already `new Worker(url)`. `tests/unit/architecture/elk-entry-points.test.ts`
+  now fails if `elk.bundled.js` is imported from `src/` again — worth knowing that the
+  main-thread placement of it is the _silent_ failure, since it works by blocking the UI in
+  an in-process fake worker and would pass every test here. See ADR-0002 "Corrected".
+- **A hook that reads a prop, called in the same tick as the state change it should react
+  to.** `Editor.tsx` did `load(imported); autoLayout.run()`. `run` closes over the
+  `diagram` PROP, so it arranged the document being replaced — on a fresh session the empty
+  one, which `ElkLayoutEngine` short-circuits, so auto-layout on import was a silent no-op:
+  no worker, no error, no positions. The store was already correct; React had simply not
+  re-rendered yet. `run` now takes the document to arrange, and the caller passes it
+  explicitly. Anything that loads and then acts on what it loaded has this shape — pass the
+  value, do not re-read it.
 - **Playwright's `locator.click()` cannot catch a visibility bug**, because its actionability
   checks wait for the element to be visible before pressing. The 19 ms window above is
   politely waited out and the click passes. Interaction specs on this canvas use raw

@@ -48,25 +48,42 @@ at. See "How to drive the real app" at the bottom.
 | Drag not regressed            | 20 distinct transforms during the gesture, dx 114 dy 57, `title="Undo Move entity"`, one undo restores to the pixel.                                                         |
 | Hover trace not regressed     | 2 traced, 2 dimmed on the sample. Trace still reaches the boxes; it just no longer costs them their size.                                                                    |
 | e2e suite                     | **Executed for the first time.** 14 specs against system Chrome, ~40 s. 13 pass, 1 expected-fail (auto-layout, see Tier 1).                                                  |
-| Auto-layout                   | **Broken, in dev and in the production build.** See Tier 1 item 1 — measured, not inferred.                                                                                  |
+| Auto-layout                   | **Broken, in dev and in the production build.** Fixed in the session below.                                                                                                  |
+
+### Verified in a real browser (Chrome, 10 Sep 2026 — auto-layout session)
+
+Both dev and `vite preview` of the production build.
+
+| Thing                           | Evidence                                                                                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-layout button              | All 4 sample boxes move to new ELK positions. Before: `0,0 / 320,0 / 640,0 / 640,260`; after: `12,219 / 344,206 / 626,35 / 336,12`. Zero alerts, zero console errors.                                                 |
+| It runs off the main thread     | Exactly one `worker` event, at `/assets/elk-worker.min-<hash>.js` in prod. An in-process fallback would satisfy every other assertion, so the spec asserts this specifically.                                         |
+| It is still lazy (NFR-1.8)      | **0** workers and no elk network requests before the first layout; after it, `ElkLayoutEngine-*.js` then `elk-worker.min-*.js`.                                                                                       |
+| One undo step (FR-3.4)          | Undo button reads `Undo Auto-layout`; one click restores the displaced arrangement exactly.                                                                                                                           |
+| SQL import arranges the schema  | A 3-table `.sql` imports to `12,25 / 280,12 / 561,12` — **not** `fallbackPosition`'s `0,0 / 280,0 / 560,0` grid. One worker created. Screenshot looked at: a proper left-to-right chain with orthogonal FK-row edges. |
+| Entry bundle still under budget | 718,191 B raw / **222,462 B gzip** (was 717,768 / 222,275). Budget 500 KB. Zero GWT fingerprints (`gwtOnLoad`, `$wnd`) in the entry chunk.                                                                            |
+| Production build, not just dev  | Every row above re-run against `vite preview`. Layout took ~1.06 s end to end, including the 1.6 MB worker fetch.                                                                                                     |
 
 ### Known broken
 
-1. **Auto-layout does nothing, and throws.** `elkjs/lib/elk.bundled.js` cannot run inside a
-   Web Worker, which is exactly what `src/layout/worker/layout.worker.ts` asks of it.
-   Diagnosed to the line; see Tier 1 item 1. This also means the path NEXT.md calls the
-   strongest in the product — SQL DDL to auto-layout in one click — does not work: an
-   imported schema lands on the placeholder grid.
-2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
-   arrangement work is lost. A product gap rather than a bug — see Tier 2.
-3. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+1. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+   arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
+   visible thing on this list, because the layout it throws away is finally a real one.
+2. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-4. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
-   overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
+3. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 2 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
 Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
+
+- ~~Auto-layout does nothing, and throws.~~ **Two independent defects, not one.**
+  `elk.bundled.js` cannot run inside a Web Worker — it is the main-thread build whose job is
+  to start one. And separately, `autoLayout.run()` read the pre-import `diagram` prop, so
+  the import path arranged the document it had just replaced; on a fresh session that is the
+  empty one, which the engine short-circuits, so it was a silent no-op. Fixed by letting
+  elkjs own the worker and by passing the imported document explicitly.
 
 - ~~Clicking an entity does not select it, and clears the selection you had.~~ Root cause was
   that the app dropped React Flow's `dimensions` changes; every node rebuild therefore
@@ -78,14 +95,14 @@ Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without 
 
 ### Numbers, so drift stays visible
 
-- 694 unit tests in 28 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+- 697 unit tests in 29 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
   lines against an 80% gate.
-- **14 e2e specs in 2 files, ~40s, and they run.** 13 pass; 1 (`auto-layout`) is marked
-  `test.fail()` because the feature is broken — Playwright turns the suite red if it starts
-  passing, which is the reminder to drop the marker. `pnpm test:e2e` is part of
-  `pnpm verify` now, and the config uses `channel: 'chrome'` so no browser download is
-  needed.
-- Bundle 718 kB raw, 222 kB gzipped.
+- **15 e2e specs in 2 files, ~40s, all passing.** No `test.fail()` markers left. `pnpm
+test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
+  download is needed.
+- Bundle 718 kB raw, 222 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
+  inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
+  only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
 
@@ -102,14 +119,13 @@ protecting:
   problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first.
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
-- **SQL DDL to auto-layout in one click.** The strongest path in the product — and as of
-  10 Sep 2026 the layout half of it has never worked in a browser (Tier 1 item 1). The
-  parsing half does. This is the single most valuable thing to repair, precisely because
-  everything else about the wedge depends on it.
+- **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
+  10 Sep 2026 it works end to end — verified in Chrome against the production build, not
+  just in dev. The layout half had never worked before that, and it took two separate
+  fixes.
 
-Two things block it. One is the bug list above — and note that the first entry on it is
-inside the third bullet, not beside it. The other is more important, and is the reason
-Tier 2 exists:
+Two things block it. One is the bug list above. The other is more important, and is the
+reason Tier 2 exists:
 
 **The layout is the user's work product, and the tool throws it away.** The strongest use
 case — "make my existing database navigable" — means re-importing after every migration.
@@ -145,13 +161,21 @@ now runs in `pnpm verify` against the system Chrome. On its first execution:
   handle. It had never been a valid gesture.
 - The auto-layout spec asserted `before !== after` around a bare Auto-layout click on a
   sample that ships already laid out, so it asserted nothing.
-- And then, once it did assert something, it found that **auto-layout is broken outright**.
+- And then, once it did assert something, it found that **auto-layout was broken
+  outright** — fixed on 10 Sep 2026, and it needed two separate fixes rather than one.
 
-The same reasoning applies to the other coverage exclusion nobody had checked:
-`src/layout/worker/**` is excluded because it "constructs a real Worker and dynamically
-imports elkjs" — and nothing had ever constructed that Worker in a browser. It does not
-work. Treat every remaining exclusion in `vite.config.ts` as unverified until an e2e spec
-covers it.
+One more lesson from that fix, worth keeping: the auto-layout spec now asserts a `worker`
+event fires, not merely that the boxes moved. elkjs has an in-process fallback that would
+have satisfied every other assertion in that spec while blocking the main thread — the exact
+NFR-1.4 violation the worker exists to prevent. **When a requirement is about HOW something
+runs, assert the mechanism and not only the outcome.**
+
+The same reasoning applied to the other coverage exclusion nobody had checked:
+`src/layout/worker/**` was excluded because it "constructs a real Worker and dynamically
+imports elkjs" — and nothing had ever constructed that Worker in a browser. It did not work.
+That one is now backed by a spec that clicks Auto-layout in Chrome and asserts the boxes
+move. Treat every remaining exclusion in `vite.config.ts` as unverified until an e2e spec
+covers it, and add the spec in the same change as the exclusion.
 
 The architecture is not the problem and does not need rework. Enforced layer boundaries,
 patch-derived undo inverses, schema-as-source-of-truth, WeakMap-cached derivations: every
@@ -160,87 +184,44 @@ almost entirely into the layers a unit test can reach.
 
 ---
 
-## Tier 1 — make it work at all
+## Tier 1 — find out whether it works on real data
 
-### 1. Auto-layout is broken in the browser
+The name of this tier changed on 10 Sep 2026, and the change is the point. It used to be
+"make it work at all", because clicking a table did not select it, the minimap was blank and
+auto-layout threw. Those are fixed and verified in Chrome. What is left is not a bug list —
+it is that every claim in this repository about behaviour at scale still rests on synthetic
+fixtures.
 
-**This is now the top of the queue, and it is bigger than it looks: it takes the product's
-strongest claim with it.** `docs/SRS.md` and this file both describe "SQL DDL to
-auto-layout in one click" as the best path through the tool. The layout half of it has
-never worked in a browser.
+### 1. Run one real schema through it
 
-**Already established — do not redo this:**
-
-- Clicking **Auto-layout** throws and moves nothing. `_Worker is not a constructor` in dev,
-  `o is not a constructor` in the minified production build. It surfaces in the UI as a
-  `role="alert"` banner, so it is at least not silent.
-- **The production build is affected too**, not just the dev server. Confirmed against
-  `vite preview`.
-- **Importing a `.sql` file leaves the schema on the placeholder grid.** `Editor.tsx` calls
-  `autoLayout.run()` after an import, and it throws. Measured: a 3-table SQL file imports
-  to `translate(0px, 0px)`, `translate(280px, 0px)`, `translate(560px, 0px)` — exactly
-  `fallbackPosition`'s `GRID_X = 280` grid, before and after clicking Auto-layout. It looks
-  plausible on a 3-table chain only because the placeholder grid is also a row; it will look
-  like a grid of unrelated boxes on anything real.
-- **The cause, at the line.** `elkjs/lib/elk-worker.js` decides what it is by environment:
-
-  ```js
-  if (typeof document === 'undefined' && typeof self !== 'undefined') {
-    self.onmessage = dispatcher.saveDispatch // "I am the worker body"
-  } else if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { default: FakeWorker, Worker: FakeWorker }
-  }
-  ```
-
-  Inside a real Web Worker the first branch wins, so nothing is exported. But
-  `elk.bundled.js` — which `layout.worker.ts` imports — does this when no `workerFactory`
-  is supplied:
-
-  ```js
-  var _require = require('./elk-worker.min.js'),
-    _Worker = _require.Worker
-  optionsClone.workerFactory = function (url) {
-    return new _Worker(url)
-  }
-  ```
-
-  `_Worker` is `undefined`, and `new ELK()` throws at worker module top level. So
-  `elk.bundled.js` **cannot be used inside a Web Worker at all**: it is the main-thread
-  build, whose whole job is to start a worker of its own.
-
-**Recommended fix — let elkjs own the thread.** `elk-worker.min.js` is _designed_ to be the
-worker body, so the hand-written wrapper is the thing to remove rather than repair:
-
-```ts
-import ELK from 'elkjs/lib/elk-api.js'
-import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url'
-
-// Classic worker, not `{ type: 'module' }` — elk-worker.min.js is a browserify UMD bundle.
-const elk = new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })
-```
-
-That deletes `layout.worker.ts`, `protocol.ts` and most of `client.ts`, and keeps NFR-1.4
-(layout off the main thread) and NFR-1.8 (elkjs not in the main bundle — check the built
-chunks to confirm the second one still holds). Worth confirming the approach before
-building, since it changes what ADR-0002 describes.
-
-Whatever the fix, **the acceptance test already exists**: `tests/e2e/smoke.spec.ts` has the
-auto-layout spec marked `test.fail()`. Remove the marker as part of the fix; the suite goes
-red on its own if you forget, because Playwright reports an expected failure that passes.
-Add one for the import path too — a `.sql` import must not land on the 280px grid.
-
-### 2. Run one real schema through it
-
-Was Tier 2 item 5. Promoted, because two of the three bugs found on 10 Sep were invisible on
-the sample: auto-layout looks like it works on a 3-table chain, and the four-box sample
-never showed how much of the canvas the inspector and minimap cover.
+Now unblocked, and the highest-value thing left. Auto-layout works, so an imported dump
+finally shows a layout rather than the placeholder grid.
 
 `docs/SRS.md` §13.1 already admits every performance figure comes from synthetic fixtures
 with uniform table sizes and tidy relationships. A real dump — 60-column tables, 200 foreign
 keys into one table, names like `tbl_cust_hist_2019` — will teach more in five minutes than
 another week of synthetic testing. The width estimates in `measure.ts` are exactly the kind
-of thing it should break, and there is a no-overlap test that will say so. Do this after
-item 1, since a real schema without working auto-layout only shows the placeholder grid.
+of thing it should break, and there is a no-overlap test that will say so.
+
+Two numbers to collect while you are in there, because neither has ever been measured in a
+browser:
+
+- **NFR-1.4 at scale.** The 120-entity reference schema has never been laid out in Chrome.
+  The ~840 ms on record is `pnpm test:perf` calling ELK in-process on the test thread. The
+  four-entity sample takes ~1.06 s end to end in the browser, but that is almost entirely
+  worker fetch and GWT init, so it says nothing about 120 tables. Lay out 120 and record it.
+- **Whether the main thread actually stays free.** It is genuinely a worker now, so it
+  should be — but NFR-1.4 says "never blocks for more than 50 ms at a time" and nobody has
+  looked at a long-task trace. `postMessage` of a large graph is itself a main-thread cost,
+  and so is applying the result through the command stack.
+
+### 2. Search and command palette (FR-2.6, FR-9.2)
+
+Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
+reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
+being usable at that size. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026 after
+sitting unused through six stages; re-add them when this starts, or decide that a substring
+match over a hundred table names does not need a fuzzy-search library.
 
 ## Tier 2 — make it actually useful
 
@@ -260,14 +241,10 @@ applied.
 
 In order:
 
-4. **Search and command palette** (FR-2.6, FR-9.2). At 100 tables, "find CUSTOMER" is worth
-   more than everything else unbuilt. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026
-   after sitting unused through six stages; re-add them when this starts, or decide that a
-   substring match over a hundred table names does not need a fuzzy-search library.
-5. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+4. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-6. **Stop rebuilding every node object on hover.** The performance half of the
+5. **Stop rebuilding every node object on hover.** The performance half of the
    click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
    split-store note already promises ("hover is separated _so that_ it does not re-render
    every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
@@ -277,7 +254,7 @@ In order:
    `EntityNode` subscribe to trace state by its own id instead of receiving it in
    `node.data`. Measure first: at four entities it is free, and the cost has never been
    measured at scale.
-7. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+6. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.

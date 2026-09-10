@@ -8,7 +8,6 @@ export default defineConfig({
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
-  worker: { format: 'es' },
   test: {
     // `node`, not `jsdom`, and deliberately so. jsdom costs ~1s of setup per test FILE,
     // and most suites here have nothing to render — the domain layer is Node-testable by
@@ -77,9 +76,16 @@ export default defineConfig({
         'src/render/reactflow/Canvas.tsx',
         'src/render/reactflow/SurfaceObserver.tsx',
         'src/render/notation/chen/**',
-        // Browser-only: constructs a real Worker and dynamically imports elkjs, neither
-        // of which jsdom provides. The layout it drives is covered in tests/unit/layout
-        // against the real ELK library, and the budget in tests/perf.
+        // Browser-only: constructs a real Worker, which jsdom does not provide. The
+        // layout it drives is covered in tests/unit/layout against the real ELK library,
+        // and the budget in tests/perf.
+        //
+        // This exclusion was previously worded as deferring to "a real Worker and a
+        // dynamic elkjs import" — and constructing that worker was precisely what did not
+        // work, for six stages, because nothing browser-side ever ran. What backs it now
+        // is `tests/e2e/smoke.spec.ts`, which drives Auto-layout in Chrome and asserts the
+        // boxes actually move. If you widen what lives behind this line, widen that spec
+        // in the same change.
         'src/layout/worker/**',
         'src/layout/elk/ElkLayoutEngine.ts',
         'src/features/editor/useAutoLayout.ts',
