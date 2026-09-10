@@ -20,7 +20,7 @@ pnpm dev
 pnpm test          # unit only, ~55s on this machine
 pnpm test:coverage # enforces 80%; NOT part of verify — run it yourself
 pnpm test:perf     # layout budgets, slow, run when touching layout or measurement
-pnpm test:e2e      # 14 specs on the system Chrome, ~40s. No browser install needed:
+pnpm test:e2e      # 16 specs on the system Chrome, ~40s. No browser install needed:
                    # playwright.config.ts sets `channel: 'chrome'`. Part of verify.
 ```
 
