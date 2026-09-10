@@ -255,25 +255,73 @@ its own boxes, and indifferent to the shape of the graph.
   disagree with. `tests/e2e/measurement.spec.ts` is the replacement and it fails today, on
   purpose: `dim_cust_master_hist_2019: measure.ts says 216px tall, the browser draws 333px`.
 
-**The decision to make first.** Two shapes of fix, and they look different on screen:
+**Measured in Chrome, 10 Sep 2026 — this replaces the guesswork in the paragraph above.**
+Every number here came off the DOM with the `wide-names.sql` fixture at L2; the arithmetic
+is unambiguous because `line-height` is 20.3px and row padding is 3px top and bottom:
 
-- **Teach the estimate to wrap.** Compute the width left for the name after the type and
-  badges, divide, and add a line's height per extra line. Nothing about the rendering
-  changes — boxes stay as tall as they are and ELK simply stops being lied to. Roughly ten
-  lines in `measureEntity`. It does not help item 2: tall boxes are what makes the ribbon.
-- **Stop names wrapping.** `white-space: nowrap; text-overflow: ellipsis` on
-  `.erd-attr__name`, with the full name in a `title`. Every row is 26 px again, so the
-  existing estimate becomes correct and boxes get shorter and more uniform — which also
-  softens item 2. The cost is that a 50-character column name is only readable on hover,
-  and this tool's whole claim is legibility at scale.
+| Part                     | `measure.ts` says  | The browser draws                   |
+| ------------------------ | ------------------ | ----------------------------------- |
+| Header                   | `headerHeight: 36` | **38 px**                           |
+| "+ Add field" row        | `addRowHeight: 24` | **27 px**                           |
+| Attribute row, one line  | `rowHeight: 26`    | 26–27 px — correct                  |
+| Attribute row, two lines | `rowHeight: 26`    | **47–48 px** (20.3 x 2 + 6 padding) |
+| Box border               | not accounted for  | 2 px, `box-sizing: border-box`      |
+| Max width                | `maxWidth: 320`    | `.erd-node` caps at **300 px**      |
+| Min width                | `minWidth: 168`    | **160 px** (120 px at L0)           |
 
-Recommend the second, with the first as a follow-up for the header and the 320/300 drift:
-a diagram where one table is 3,000 px tall is not legible whatever ELK does with it, so
-truncating is the fix that serves the product rather than only the arithmetic. But it is a
-visible change to how every table reads, so it wants agreeing first.
+Worked example — `dim_cust_master_hist_2019`, six columns: 38 header + (47+27+48+48+48+48
+rows) + 27 add-row + 2 border = **333 px**. `measure.ts` predicts 36 + 6x26 + 24 = **216 px**.
+That is the whole 117px gap, accounted for line by line.
 
-Whichever, `tests/e2e/measurement.spec.ts` is the acceptance test — drop its `test.fail()`
-as part of the change. Reproduction: `tests/fixtures/wide-names.sql`.
+**The finding that decides this, and it is not what the paragraph above assumed.** The
+per-row variation is text wrapping inside `.erd-attr__name`, and the width at which a name
+wraps depends on its actual glyphs, not on its length. Measured on six real column names:
+
+| Name length | Rendered width | Effective px/char |
+| ----------- | -------------- | ----------------- |
+| 36 chars    | 324 px         | 9.0               |
+| 38 chars    | 386 px         | 10.2              |
+| 44 chars    | 279 px         | 6.3               |
+| 47 chars    | 291 px         | 6.2               |
+
+`measure.ts` uses a single `charWidth: 7.8`. Against a 1.6x spread, a fixed per-character
+width cannot predict where a line breaks — it will under-predict some rows (overlap, the
+unsafe direction) and over-predict others. **So "teach the estimate to wrap" as written
+above is unsound, not merely inferior.** It cannot be made reliable by better calibration,
+and `measure.ts` exists precisely to avoid measuring the DOM (its header explains why: a
+synchronous reflow across every node blows NFR-1.3 on its own, and culled nodes are not
+mounted to measure).
+
+**So the real choice is between these two:**
+
+- **A — pin every row to one line in CSS.** `text-overflow: ellipsis` plus
+  `white-space: nowrap` on `.erd-attr__name` (and `min-width: 0` so the flex item can
+  actually shrink), full name in a `title`. Rows become deterministically 26 px on every
+  platform and font, so the existing flat `rowHeight` is right **by construction rather
+  than by calibration** — and the e2e spec can assert the estimate matches the DOM exactly.
+  Boxes also get much shorter, which is the one thing that helps item 2's ribbon. Cost: a
+  long column name is only fully readable on hover.
+- **B — deliberately over-estimate.** Assume two lines for any row whose name plus type
+  could plausibly exceed the width, using the widest observed px/char (~10.2) rather than
+  the average. No visual change at all and the overlap goes away, because the error is
+  forced into the safe direction. Costs: diagrams with long names get noticeably airier,
+  the estimate stays approximate, and the contract weakens from "matches the DOM" to "never
+  under-estimates" — `tests/e2e/measurement.spec.ts` would need relaxing to assert that
+  inequality instead of equality.
+
+**Recommend A.** B is honest arithmetic around a problem A removes: while rows can wrap, no
+fixed-width estimate is trustworthy across platforms, and every future change to the type
+scale re-opens the same gap. A is also the only one of the two that makes item 2 easier.
+The objection to A is real — legibility at scale is this tool's claim, and truncating names
+cuts against it — which is why it is still a decision rather than a change.
+
+Either way, fold in the decision-independent corrections while you are there: header 36→38,
+add-row 24→27, the 2px border, and the 320/300 and 168/160 width drift. All of those make
+the estimate larger, i.e. safer. Alone they close only ~7px of 117px, which is why they are
+not worth a commit on their own.
+
+`tests/e2e/measurement.spec.ts` is the acceptance test (relax it to an inequality if B).
+Reproduction: `tests/fixtures/wide-names.sql`.
 
 ### 2. Lay out a hub-and-spoke schema so it is readable
 
