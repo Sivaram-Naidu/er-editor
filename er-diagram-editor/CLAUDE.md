@@ -188,6 +188,24 @@ culling off.
   `mouse.move` / `down` / `up` with no pause between the move and the press — see
   `coldClick` in `tests/e2e/helpers.ts`. Related: `test.fail()` outside a test body marks
   every test in the file.
+- **Four ELK options that sound like they fix a wide layer and do nothing.** A table
+  referenced by forty others puts all forty at one dependency depth, and `layered` stacks a
+  depth into one column — 838x21134px, a ribbon unreadable at any zoom or detail level.
+  `elk.aspectRatio`, `elk.layered.wrapping.strategy`,
+  `elk.layered.highDegreeNodes.treatment` and `nodePlacement.strategy: NETWORK_SIMPLEX` all
+  produce **byte-identical** output on it — verified against a sanity check that
+  `elk.spacing.nodeNode` DOES change the output, so the options were reaching ELK.
+  `wrapping.strategy` is the trap: it wraps a long chain of LAYERS into rows, and the
+  problem is one layer with too many nodes IN it. The fix layers the graph ourselves and
+  hands ELK partitions — `src/layout/elk/wideLayers.ts`. Two halves of it are easy to lose:
+  - **`nodePlacement.strategy` must become `SIMPLE`, or partitioning buys almost nothing**
+    (21134 → 19125px). The default `BRANDES_KOEPF` aligns nodes with their edges to
+    straighten them, so it spreads the forty dependents back across the hub's whole edge
+    fan. Applied only when a split happens — straight edges are worth having otherwise.
+  - **Layer by dependency depth, not breadth-first distance from the hub.** BFS numbers a
+    dependency chain backwards, so the chain reads right-to-left while the rest of the
+    diagram reads left-to-right — the one thing ADR-0002 chose a layered algorithm for.
+    There is a test asserting a chain keeps its order.
 - **A test that feeds its own estimate back in cannot validate the estimate.**
   `tests/unit/layout` had a spec named "produces no overlapping boxes" whose comment
   claimed "if the measurements in measure.ts drift away from what canvas.css draws, this is

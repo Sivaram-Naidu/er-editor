@@ -46,8 +46,28 @@ const TREE: Record<string, string> = {
   'elk.separateConnectedComponents': 'true',
 }
 
-export function optionsFor(algorithm: LayoutAlgorithm): Record<string, string> {
+/**
+ * The extra options a split-layer graph needs, merged on top of `LAYERED`.
+ *
+ * `SIMPLE` node placement is the half that is easy to leave out and does most of the work:
+ * `BRANDES_KOEPF` aligns nodes with their edges to straighten them, which spreads a hub's
+ * dependents back out over the full height of its edge fan and leaves partitioning worth
+ * almost nothing (21134px down to 19125px, measured). `SIMPLE` stacks them instead.
+ *
+ * It is applied ONLY when a layer actually got split, because straight edges are worth
+ * having on every schema that does not have this problem — see `wideLayers.ts`.
+ */
+const SPLIT_LAYERS: Record<string, string> = {
+  'elk.partitioning.activate': 'true',
+  'elk.layered.nodePlacement.strategy': 'SIMPLE',
+}
+
+export function optionsFor(
+  algorithm: LayoutAlgorithm,
+  hasSplitLayers = false,
+): Record<string, string> {
   if (algorithm === 'force') return FORCE
   if (algorithm === 'tree') return TREE
-  return LAYERED
+  // Partitioning is a `layered` feature; the other two ignore it.
+  return hasSplitLayers ? { ...LAYERED, ...SPLIT_LAYERS } : LAYERED
 }

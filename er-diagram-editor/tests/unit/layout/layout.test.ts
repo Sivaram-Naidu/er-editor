@@ -251,6 +251,67 @@ describe('against the real ELK library', () => {
     return new ELK().layout(graph)
   }
 
+  /**
+   * THE TEST THAT WOULD HAVE CAUGHT THE RIBBON.
+   *
+   * One table referenced by forty others puts all forty at the same dependency depth, and
+   * `layered` stacks a depth into one column. Every other spec in this file passes on that
+   * layout: there are no overlaps, every entity has a position, the chain reads left to
+   * right. It is simply 838px wide and 21,134px tall — a ribbon nobody can read at any zoom
+   * or any detail level. What no assertion here looked at was the SHAPE of the result.
+   *
+   * `splitWideLayers` fixes it by splitting the crowded depth into partitions, which is a
+   * property of `toElkGraph` plus ELK together — neither half is wrong on its own, so the
+   * test belongs on the pair.
+   */
+  it('lays a hub out as a block rather than a 21,000px ribbon', async () => {
+    const spokes = Array.from({ length: 40 }, (_, index) =>
+      createEntity({
+        name: `SPOKE_${String(index)}`,
+        attributes: Array.from({ length: 8 }, (_, field) =>
+          createAttribute({ name: `field_${String(field)}`, dataType: 'varchar(255)' }),
+        ),
+      }),
+    )
+    const hub = createEntity({
+      name: 'HUB',
+      attributes: Array.from({ length: 20 }, (_, field) =>
+        createAttribute({ name: `hub_field_${String(field)}`, dataType: 'varchar(255)' }),
+      ),
+    })
+    const diagram = createDiagram({
+      entities: [...spokes, hub],
+      relationships: spokes.map((spoke) => createRelationship({ from: spoke.id, to: hub.id })),
+    })
+
+    const sizes = measureAll(diagram, 2)
+    const result = fromElkGraph(
+      (await runElk(toElkGraph({ diagram, sizes }))) as Parameters<typeof fromElkGraph>[0],
+    )
+
+    const boxes = Object.entries(result.positions).map(([id, point]) => ({
+      x: point.x,
+      y: point.y,
+      width: sizes[id as EntityId]?.width ?? 0,
+      height: sizes[id as EntityId]?.height ?? 0,
+    }))
+    const width =
+      Math.max(...boxes.map((box) => box.x + box.width)) - Math.min(...boxes.map((box) => box.x))
+    const height =
+      Math.max(...boxes.map((box) => box.y + box.height)) - Math.min(...boxes.map((box) => box.y))
+
+    /*
+     * A generous band, on purpose: the exact numbers move with the type scale and with ELK
+     * versions, and this is a guard against a pathological shape rather than a pixel
+     * assertion. Before the fix this came out at 0.04, and a screen is about 1.6.
+     */
+    expect(
+      width / height,
+      `${String(Math.round(width))}x${String(Math.round(height))}`,
+    ).toBeGreaterThan(0.25)
+    expect(height, 'taller than any screen can show at a readable zoom').toBeLessThan(9_000)
+  }, 30_000)
+
   it('accepts our graph and returns a position for every entity', async () => {
     const { diagram, entities } = chain(6)
     const graph = toElkGraph({ diagram, sizes: measureAll(diagram, 2) })

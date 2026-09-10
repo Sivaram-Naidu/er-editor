@@ -862,10 +862,16 @@ defects surfaced. All three are recorded in `NEXT.md` with reproductions:
    upward, so the estimate now over-estimates by at most 4px and never under-estimates.
    0 overlapping pairs at every detail level. `tests/e2e/measurement.spec.ts` asserts the
    inequality against the rendered box and passes.
-2. **A hub-and-spoke schema renders as an unusable vertical ribbon.** 40 tables all
-   referencing one hub become a single ELK layer, roughly 1,000px wide and 40,000px tall.
-   NFR-2.2's "remain usable up to 300 entities" is not a count question alone; it is a
-   shape question, and this shape is the common one in a warehouse.
+2. ~~**A hub-and-spoke schema renders as an unusable vertical ribbon.**~~ **Fixed 11 Sep 2026.** 40 tables referencing one hub all sat at the same dependency depth, and `layered`
+   stacks a depth into one column: 838x21134px. None of ELK's own options address it —
+   `elk.aspectRatio`, `elk.layered.wrapping.strategy` and
+   `elk.layered.highDegreeNodes.treatment` produce byte-identical output, because `wrapping`
+   wraps a long chain of layers rather than one overfull layer. `src/layout/elk/wideLayers.ts`
+   now computes dependency depth, splits any crowded depth into ELK partitions and switches
+   node placement to `SIMPLE` for that case only. Measured in Chrome: L2 838x21134 →
+   3186x4275, aspect 0.04 → 0.75, 0 overlapping boxes, and Pagila byte-identical to before.
+   The lesson for NFR-2.2 stands: "remain usable up to 300 entities" is a shape question,
+   not only a count question, and the count says nothing about it.
 3. **NFR-1.4's 50 ms main-thread clause is violated** — see that row.
 
 Still open: no schema belonging to anyone has been run through it. Everything above is

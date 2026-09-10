@@ -89,29 +89,44 @@ Both dev and `vite preview` of the production build.
 | Hub-and-spoke at L2                                  | 40 tables onto one hub renders as a single vertical ribbon, ~1,000 px wide by ~40,000 px tall. Screenshot looked at: unreadable at any zoom.                                        |
 | The `.erd.json` fixtures                             | `reference.erd.json` / `stress.erd.json` / `small.erd.json` are empty **and invalid** — no top-level `id`, so importing one is rejected. Their README claimed 120 and 300 entities. |
 
+### Verified in a real browser (Chrome, 11 Sep 2026 — hub layout session)
+
+| Thing                               | Evidence                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 41-table hub schema, extent         | L0 **3038x889** (was 708x3864), L1 **3376x1484** (was 838x7264), L2 **3186x4275** (was 838x21134). Aspect 0.18/0.12/0.04 → **3.42/2.27/0.75**. L2 is five times shorter. |
+| All boxes present, none overlapping | 41 of 41 rendered after fitView, **0 overlapping pairs** at every detail level.                                                                                          |
+| It reads as a diagram               | Screenshot looked at: hub on the left, 40 dependents in a ~7-column block, orthogonal edges, table and key names legible. Was a 1px-wide ribbon.                         |
+| Pagila is untouched                 | 1726x1536 / 2657x1966 / 4063x2992 — **byte-identical** to the same run with the split disabled. A real schema whose tables are mostly unrelated does not trigger it.     |
+| 120-entity reference is a wash      | L0 1616x2105 vs 1616x2047 disabled; L2 4945x3090 vs 4945x3205. Marginally squarer at L2, no overlaps either way.                                                         |
+| Layout still fast                   | 344 / 321 / 728 ms at L0 / L1 / L2 on 41 tables. `pnpm test:perf` budgets still pass.                                                                                    |
+
 ### Known broken
 
-1. **A hub-and-spoke schema is unusable at L2.** 40 tables referencing one hub all land in
-   a single ELK layer, giving a diagram ~1,000 px wide and ~40,000 px tall — a vertical
-   ribbon, unreadable at every zoom. This is the ordinary shape of a warehouse or any
-   schema with a `users` table, and NFR-2.2's "usable up to 300 entities" says nothing
-   about it because it counts entities rather than looking at shape. Tier 1 item 2.
-2. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
+1. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
    473 ms, even though ELK now genuinely runs in a worker. The block is on our side of the
    boundary: applying 120 positions is one Immer pass plus patch derivation plus a store
    publish plus revalidation, and then React commits 120 nodes and 150 edges at once.
-   Tier 1 item 3.
-3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+   Tier 1 item 1.
+2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
-4. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+3. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-5. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
-   overlay minimap, but combined with 4 a good deal of the canvas is unreachable. See
+4. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
-Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
+Fixed and verified in a browser on 10–11 Sep 2026 — do not re-open these without new
+evidence:
+
+- ~~A hub-and-spoke schema is unusable at L2.~~ **Fixed 11 Sep 2026.** None of ELK's own
+  options touch it: `elk.aspectRatio`, `elk.layered.wrapping.strategy` and
+  `elk.layered.highDegreeNodes.treatment` all produce byte-identical output, because
+  `wrapping` wraps a long chain of layers and the problem is one layer with too many nodes
+  in it. The fix does the layering itself — compute dependency depth, split any crowded
+  depth into partitions, hand ELK the answer (`src/layout/elk/wideLayers.ts`). L2 went from
+  838x21134 to 3186x4275, and Pagila is byte-identical to before.
 
 - ~~`measure.ts` under-measures every box whose column names wrap.~~ Rows are now pinned to
   one line in CSS (`text-overflow: ellipsis`, with the full name in the `title`), so the
@@ -137,7 +152,7 @@ Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without 
 
 ### Numbers, so drift stays visible
 
-- 698 unit tests in 29 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+- 708 unit tests in 30 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
   lines against an 80% gate.
 - **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
@@ -158,11 +173,11 @@ The bet is sound; the tool is not yet. Three things are genuinely differentiated
 protecting:
 
 - **Large schemas.** LOD + viewport culling + hover-tracing is a real answer to a real
-  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first. **Now
-  partly evidenced and partly dented** (10 Sep 2026): 120 tables lay out cleanly in under a
-  second in Chrome, and a real 71-table dump imports with no overlaps at all — but give it
-  realistic column names and boxes overlap, and give it one hub with 40 dependents and the
-  result is an unreadable ribbon. Tier 1 items 1 and 2.
+  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first. **Now evidenced** (11 Sep 2026): 120 tables lay out cleanly in under a second in
+  Chrome, a real 71-table dump imports with no overlaps at all, and the two shapes that
+  broke it — realistic column names, and one hub with 40 dependents — are both fixed with
+  browser evidence above. What is still unproven is that it stays RESPONSIVE while doing
+  it: NFR-1.4's 50 ms main-thread clause is violated by up to 473 ms (Tier 1 item 1).
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
 - **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
@@ -244,30 +259,7 @@ in Chrome, a real dump imports with no overlaps at all, and the ~840 ms the perf
 reports in-process was an honest number. The tool is not slow. It is wrong about the size of
 its own boxes, and indifferent to the shape of the graph.
 
-### 1. Lay out a hub-and-spoke schema so it is readable
-
-40 tables all referencing one hub produce a single ELK layer: a diagram roughly 1,000 px
-wide and 40,000 px tall, unreadable at any zoom. Screenshot evidence is in the browser table
-above. This is not an exotic shape — it is every warehouse fact table, and every schema with
-a `users` table that half the others point at. NEXT.md has been claiming "large schemas" as
-one of three differentiators, and this is the shape that claim has to survive.
-
-Undiagnosed beyond the observation. Things worth trying, cheapest first:
-
-- `elk.layered.nodePlacement.strategy` and `elk.aspectRatio` — ELK takes a target aspect
-  ratio and is currently not given one.
-- Splitting a high-degree hub across layers, or `elk.layered.wrapping.strategy`, which
-  exists for exactly this and is not set in `options.ts`.
-- Whether `force` or `mrtree` (both already in `options.ts` and reachable via
-  `LayoutAlgorithm`) do better on this shape, and whether the algorithm should be chosen
-  from the graph rather than by the user.
-- **Correction, 10 Sep 2026:** the previous version of this item said the box-measurement
-  fix would make it easier. It barely did. Pinning rows to one line cut L2 box heights by
-  about 42% (767–2963 px down to 504–1711 px) and the ribbon is still a ribbon — 41 tables
-  in one column, unreadable at every zoom. The problem is the single ELK layer, not the box
-  height, so treat this as untouched by that work.
-
-### 2. Stop the main thread blocking for 473 ms when a layout lands
+### 1. Stop the main thread blocking for 473 ms when a layout lands
 
 NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". Measured in
 Chrome on the 120-entity reference schema: blocks of **323 ms at L0, 142 ms at L1 and 473 ms
@@ -283,7 +275,7 @@ between them. The obvious levers are chunking the commit, `startTransition` arou
 apply, or keeping revalidation off the layout path. Note that NFR-1.3's 100 ms interaction
 budget has never been measured in a browser either, and probably fails on the same path.
 
-### 3. Search and command palette (FR-2.6, FR-9.2)
+### 2. Search and command palette (FR-2.6, FR-9.2)
 
 Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
 reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
@@ -293,7 +285,7 @@ match over a hundred table names does not need a fuzzy-search library.
 
 ## Tier 2 — make it actually useful
 
-### 4. Re-import onto an existing diagram, preserving layout
+### 3. Re-import onto an existing diagram, preserving layout
 
 The item that changes what the tool is. Import currently replaces the document wholesale.
 What is needed: import a `.sql` or `.mmd` over the _current_ diagram, match entities by
@@ -309,10 +301,10 @@ applied.
 
 In order:
 
-5. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+4. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-6. **Stop rebuilding every node object on hover.** The performance half of the
+5. **Stop rebuilding every node object on hover.** The performance half of the
    click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
    split-store note already promises ("hover is separated _so that_ it does not re-render
    every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
@@ -322,7 +314,7 @@ In order:
    `EntityNode` subscribe to trace state by its own id instead of receiving it in
    `node.data`. Measure first: at four entities it is free, and the cost has never been
    measured at scale.
-7. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+6. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.
