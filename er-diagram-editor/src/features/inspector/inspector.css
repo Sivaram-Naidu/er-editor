@@ -11,9 +11,21 @@
   min-height: 0;
 }
 
+/* Canvas plus the problems strip. A column inside the row, so the inspector stays full
+ * height alongside both rather than being pushed above the strip. */
+.erd-canvas-column {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .erd-main {
   flex: 1;
   min-width: 0;
+  /* Needed as well as `flex: 1`: without it the canvas refuses to shrink below its
+   * content height and the problems strip pushes the bottom of the diagram off screen. */
+  min-height: 0;
 }
 
 .erd-inspector {

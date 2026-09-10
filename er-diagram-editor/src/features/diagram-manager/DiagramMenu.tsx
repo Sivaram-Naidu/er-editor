@@ -30,6 +30,13 @@ function relativeTime(iso: string): string {
 
 export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
   const [open, setOpen] = useState(false)
+  // Which row is asking to be confirmed. Deleting a saved diagram is the one destructive
+  // action in the app that the command stack cannot reverse — it is a row in IndexedDB,
+  // not a document edit — so it is the one that has to ask first.
+  //
+  // Asking in the row rather than in a modal: the list is right there, the name is
+  // already on screen, and a modal would need its own focus management to be no clearer.
+  const [pendingDeleteId, setPendingDeleteId] = useState<DiagramId | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement>(null)
 
   // Dismiss on an outside click or Escape. A menu that can only be closed by the button
@@ -38,10 +45,18 @@ export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
     if (!open) return
 
     const onPointerDown = (event: PointerEvent): void => {
-      if (!containerRef.current?.contains(event.target as Node)) setOpen(false)
+      if (containerRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+      // A question left half-asked must not be waiting when the menu is next opened.
+      setPendingDeleteId(undefined)
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
+      // Escape backs out of the confirmation first, and only closes the menu once there
+      // is nothing pending — otherwise one keystroke both cancels and dismisses, and the
+      // user cannot tell which of the two it did.
+      if (event.key !== 'Escape') return
+      if (pendingDeleteId !== undefined) setPendingDeleteId(undefined)
+      else setOpen(false)
     }
 
     document.addEventListener('pointerdown', onPointerDown)
@@ -50,9 +65,14 @@ export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
       document.removeEventListener('pointerdown', onPointerDown)
       document.removeEventListener('keydown', onKeyDown)
     }
-  }, [open])
+  }, [open, pendingDeleteId])
 
   const others = props.saved.filter((summary) => summary.id !== props.currentId)
+
+  const closeMenu = (): void => {
+    setOpen(false)
+    setPendingDeleteId(undefined)
+  }
 
   return (
     <div className="erd-diagrammenu" ref={containerRef}>
@@ -64,7 +84,8 @@ export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => {
-          setOpen((current) => !current)
+          if (open) closeMenu()
+          else setOpen(true)
         }}
       >
         <span className="erd-diagrammenu__name">{props.name}</span>
@@ -94,7 +115,7 @@ export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
             className="erd-btn"
             onClick={() => {
               props.onNew()
-              setOpen(false)
+              closeMenu()
             }}
           >
             New diagram
@@ -115,23 +136,49 @@ export function DiagramMenu(props: DiagramMenuProps): React.ReactElement {
                       className="erd-fieldlist__item"
                       onClick={() => {
                         props.onOpen(summary.id)
-                        setOpen(false)
+                        closeMenu()
                       }}
                     >
                       <span>{summary.name}</span>
                       <span className="erd-fieldlist__type">{relativeTime(summary.updatedAt)}</span>
                     </button>
-                    <button
-                      type="button"
-                      className="erd-btn erd-btn--small erd-btn--danger"
-                      title={`Delete ${summary.name}`}
-                      aria-label={`Delete ${summary.name}`}
-                      onClick={() => {
-                        props.onDelete(summary.id)
-                      }}
-                    >
-                      ×
-                    </button>
+                    {pendingDeleteId === summary.id ? (
+                      <>
+                        <button
+                          type="button"
+                          className="erd-btn erd-btn--small erd-btn--danger"
+                          aria-label={`Confirm deleting ${summary.name}`}
+                          onClick={() => {
+                            props.onDelete(summary.id)
+                            setPendingDeleteId(undefined)
+                          }}
+                        >
+                          Delete
+                        </button>
+                        <button
+                          type="button"
+                          className="erd-btn erd-btn--small"
+                          aria-label={`Keep ${summary.name}`}
+                          onClick={() => {
+                            setPendingDeleteId(undefined)
+                          }}
+                        >
+                          Keep
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        className="erd-btn erd-btn--small erd-btn--danger"
+                        title={`Delete ${summary.name}`}
+                        aria-label={`Delete ${summary.name}`}
+                        onClick={() => {
+                          setPendingDeleteId(summary.id)
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
                   </li>
                 ))}
               </ul>

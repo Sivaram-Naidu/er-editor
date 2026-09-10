@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Renders the notation glyphs as SVG. The suite default is `node` (see the note in vite.config.ts), so a file that
+ * mounts anything has to opt back up here.
+ */
 import { render } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 

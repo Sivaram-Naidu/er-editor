@@ -54,6 +54,8 @@ export interface DiagramRepository {
 }
 
 export const LAST_OPENED_KEY = 'lastOpenedDiagramId'
+/** Preference key for the light/dark/system choice (FR-9.3). */
+export const THEME_KEY = 'theme'
 
 function toRecord(diagram: Diagram): DiagramRecord {
   return {

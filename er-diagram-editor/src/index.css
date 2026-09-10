@@ -4,6 +4,7 @@
 @import './ui/theme/notation-tokens.css';
 @import './render/reactflow/canvas.css';
 @import './features/inspector/inspector.css';
+@import './features/validation-panel/validation-panel.css';
 
 html,
 body,
@@ -60,6 +61,15 @@ body {
   background: var(--erd-signal-wash);
   color: var(--erd-ink);
   border-bottom: 1px solid var(--erd-rule);
+}
+
+/* Warnings about storage are not informational: they say work will be lost. The danger
+   colour is carried on the border and the text, leaving the wash readable in both
+   themes. */
+.erd-banner--warning {
+  background: transparent;
+  border-bottom-color: var(--erd-danger);
+  color: var(--erd-danger);
 }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
@@ -321,6 +331,40 @@ body {
 }
 
 /* ── Export ──────────────────────────────────────────────────────────────── */
+
+/*
+ * The off-screen render used for PNG / SVG export (FR-6.5).
+ *
+ * Pushed off the left edge rather than hidden: html-to-image reads computed styles and
+ * sizes from a real layout, and `display: none` or `visibility: hidden` gives it neither
+ * — the capture comes back blank. It is only in the DOM while an export is running.
+ *
+ * `left` is large enough that even a 300-table diagram cannot reach back into view, and
+ * negative rather than positive so it never extends the document's scroll width.
+ */
+.erd-export-surface {
+  position: fixed;
+  top: 0;
+  left: -100000px;
+  pointer-events: none;
+}
+
+/*
+ * The element html-to-image actually captures. Statically positioned on purpose: the
+ * clone inherits the computed styles of the element it is made from, so capturing the
+ * off-screen wrapper above produced an image of empty space. See the long note in
+ * ExportSurface.tsx. `position: relative` only so React Flow's absolutely positioned
+ * children resolve against this box.
+ */
+.erd-export-surface__page {
+  position: relative;
+}
+
+.erd-export__note {
+  margin: var(--erd-space-1) 0 0;
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+}
 
 .erd-export__preview {
   font-family: var(--erd-font-mono);

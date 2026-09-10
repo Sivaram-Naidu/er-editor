@@ -1,15 +1,28 @@
 // Add / rename / update / delete entity commands.
 
-import type { Entity, EntityId, EntityKind } from '../model/types'
+import type { Entity, EntityId, EntityKind, Point } from '../model/types'
 
 import { defineCommand, type Command } from './Command'
 
-export function addEntity(entity: Entity): Command {
+/**
+ * Add an entity, optionally at a known position.
+ *
+ * `position` is part of THIS command rather than a `moveEntities` alongside it, because
+ * an entity and the place it was put are one action to the user: undo should remove the
+ * box, not leave it behind at the origin. A transaction would also work, but it would put
+ * a coalescing move command in the history for something that never moved.
+ *
+ * Omitting it leaves the entity unpositioned, which the renderer draws on its fallback
+ * grid. That is the right behaviour for a bulk import, where auto-layout follows
+ * immediately and any position written here would be overwritten.
+ */
+export function addEntity(entity: Entity, position?: Point): Command {
   return defineCommand({
     type: 'entity.add',
     label: 'Add entity',
     mutate(draft) {
       draft.entities.push(entity)
+      if (position !== undefined) draft.layout.positions[entity.id] = position
     },
   })
 }

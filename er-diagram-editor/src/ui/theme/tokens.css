@@ -79,6 +79,17 @@
   --erd-lift: 0 2px 10px rgb(26 86 219 / 22%);
 }
 
+/* Scrollbars, select popups and form controls are painted by the browser, not by our
+ * tokens. `color-scheme` is the only thing that reaches them, so it has to track the
+ * attribute the theme hook sets (FR-9.3). */
+:root {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
 :root[data-theme='dark'] {
   --erd-paper: #12161b;
   --erd-grid: #1c222a;
