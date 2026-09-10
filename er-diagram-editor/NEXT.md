@@ -1,0 +1,411 @@
+# What to work on next
+
+**Working queue. Updated 10 September 2026.**
+
+This file exists so a session starting cold — after `/clear`, or a week later, or someone
+else entirely — knows where the project actually stands and what to pick up, without
+re-deriving it.
+
+**How this relates to the other docs.** `docs/SRS.md` §4 is the requirement table (is
+FR-6.5 built?) and §13 is what remains in requirement terms. This file is the **working
+order**: which of those to do next, why that order, and what has already been diagnosed.
+Requirement status stays in the SRS; sequencing lives here. Keep it that way — two
+competing priority lists is how the SRS status table drifted in the first place.
+
+**Update this file when you finish something.** Move the item out of its tier and write
+down what you verified and how. An entry that says "fixed" without saying how it was
+checked is worth nothing to the next session — see "Why the tests did not catch any of
+this".
+
+---
+
+## Where things stand
+
+### Verified in a real browser (Chrome, 10 Sep 2026)
+
+Not "unit tests pass" — driven with Playwright against real Chrome, with the output looked
+at. See "How to drive the real app" at the bottom.
+
+| Thing                   | Evidence                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------ |
+| App boots, sample loads | 4 entity nodes on canvas                                                             |
+| Drag an entity          | Node transform tracks the cursor; drop position == last drag frame, no jump          |
+| Drag then undo          | A 20-frame drag is ONE undo step ("Move entity"); one undo restores exactly; redo OK |
+| PNG export              | 1860x940, whole schema at L2, badges/markers/dashes all correct                      |
+| SVG export              | Same content, sharp vector text                                                      |
+| Dialog focus            | Focus enters the panel, traps, and returns to the Export button on close             |
+| Console                 | Zero errors through the whole flow                                                   |
+
+### Verified in a real browser (Chrome, 10 Sep 2026 — click-to-select session)
+
+| Thing                         | Evidence                                                                                                                                                                     |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cold click selects a table    | Pointer on the pane, then straight onto the header with no dwell: 1 node `.selected`, inspector opens on it. Was 0 before the fix.                                           |
+| Cold click narrows selection  | Two selected, then a cold click on one: exactly that one stays. Was 0 selected — the reported "clears what you had".                                                         |
+| Cold click after a LOD change | Switch Detail to Keys, click immediately: 1 selected. The non-hover trigger, which the hover-only theory would have missed.                                                  |
+| No box ever goes invisible    | MutationObserver on `.react-flow__nodes` across a hover sweep of all 4 tables: **0** `visibility: hidden` sightings. Was 4-of-4 hidden from +38 ms to +57 ms on every hover. |
+| Minimap                       | **4** `.react-flow__minimap-node` rects, 247x150 / 185x178 / 160x150 / 194x148, traced ones filled `--erd-signal`. Screenshot looked at. Was 0 rects.                        |
+| Drag not regressed            | 20 distinct transforms during the gesture, dx 114 dy 57, `title="Undo Move entity"`, one undo restores to the pixel.                                                         |
+| Hover trace not regressed     | 2 traced, 2 dimmed on the sample. Trace still reaches the boxes; it just no longer costs them their size.                                                                    |
+| e2e suite                     | **Executed for the first time.** 14 specs against system Chrome, ~40 s. 13 pass, 1 expected-fail (auto-layout, see Tier 1).                                                  |
+| Auto-layout                   | **Broken, in dev and in the production build.** See Tier 1 item 1 — measured, not inferred.                                                                                  |
+
+### Known broken
+
+1. **Auto-layout does nothing, and throws.** `elkjs/lib/elk.bundled.js` cannot run inside a
+   Web Worker, which is exactly what `src/layout/worker/layout.worker.ts` asks of it.
+   Diagnosed to the line; see Tier 1 item 1. This also means the path NEXT.md calls the
+   strongest in the product — SQL DDL to auto-layout in one click — does not work: an
+   imported schema lands on the placeholder grid.
+2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+   arrangement work is lost. A product gap rather than a bug — see Tier 2.
+3. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+   right-hand part of the diagram, including whole tables, and they stop being clickable.
+   See "Housekeeping".
+4. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
+   "Housekeeping".
+
+Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
+
+- ~~Clicking an entity does not select it, and clears the selection you had.~~ Root cause was
+  that the app dropped React Flow's `dimensions` changes; every node rebuild therefore
+  un-measured every box and made it `visibility: hidden` for ~19 ms. Fixed by carrying
+  `measured` on the node objects. See the browser table above.
+- ~~The minimap is an empty white box.~~ Same root cause, permanent form: the minimap reads
+  the _user_ node's size. Fixed by the same change. The `nodeColor` comment in `Canvas.tsx`
+  was a red herring — it fixes the fill colour, and was never why the box was empty.
+
+### Numbers, so drift stays visible
+
+- 694 unit tests in 28 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+  lines against an 80% gate.
+- **14 e2e specs in 2 files, ~40s, and they run.** 13 pass; 1 (`auto-layout`) is marked
+  `test.fail()` because the feature is broken — Playwright turns the suite red if it starts
+  passing, which is the reminder to drop the marker. `pnpm test:e2e` is part of
+  `pnpm verify` now, and the config uses `channel: 'chrome'` so no browser download is
+  needed.
+- Bundle 718 kB raw, 222 kB gzipped.
+- 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
+  (`.erd.json`, `.mmd`, PNG, SVG).
+
+---
+
+## The assessment behind this ordering
+
+### Is the tool useful?
+
+The bet is sound; the tool is not yet. Three things are genuinely differentiated and worth
+protecting:
+
+- **Large schemas.** LOD + viewport culling + hover-tracing is a real answer to a real
+  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first.
+- **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
+  structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
+- **SQL DDL to auto-layout in one click.** The strongest path in the product — and as of
+  10 Sep 2026 the layout half of it has never worked in a browser (Tier 1 item 1). The
+  parsing half does. This is the single most valuable thing to repair, precisely because
+  everything else about the wedge depends on it.
+
+Two things block it. One is the bug list above — and note that the first entry on it is
+inside the third bullet, not beside it. The other is more important, and is the reason
+Tier 2 exists:
+
+**The layout is the user's work product, and the tool throws it away.** The strongest use
+case — "make my existing database navigable" — means re-importing after every migration.
+Import builds a fresh `Diagram` with regenerated entity ids and re-runs auto-layout, so
+every position the user arranged is lost. That makes this a one-shot snapshot generator,
+which is something Mermaid already gives away for free. Fixing it turns the tool into a
+living document, and it is worth more than any remaining feature on the roadmap.
+
+### Why the tests did not catch any of this
+
+Every defect found on 10 Sep 2026 — drag teleporting, image export hanging, image export
+blank, image export inkblotted, click-to-select — sat underneath 680 passing tests and 92%
+coverage. All five were in the same gap: between "verified by unit test" and "works when a
+human clicks it".
+
+The cause is visible in `vite.config.ts`. `tests/e2e` is excluded from `pnpm test`; the four
+Playwright specs have never run (the browsers were not even installed); and `Canvas.tsx` is
+coverage-excluded on the reasoning that its behaviour is _"geometry and pointer events —
+meaningless to assert in jsdom. Covered by tests/e2e."_
+
+That division of labour is right. The half it defers to never ran, so those exclusions were
+load-bearing promises with nothing behind them. Which is why Tier 1 is about closing the
+seam, not about the individual bugs.
+
+**Update, 10 Sep 2026: the seam is closed, and it paid for itself immediately.** The suite
+now runs in `pnpm verify` against the system Chrome. On its first execution:
+
+- Two of the four existing specs failed on their own locators. `getByText('CUSTOMER')`
+  matched the CUSTOMER box _and_ the `customer_id` field; `hasText: 'ORDER'` matched ORDER
+  and ORDER_LINE. Both had rotted silently as the UI grew rows.
+- The drag-to-connect spec dropped the connection on the middle of the target box, which
+  React Flow cannot accept — it only completes within `connectionRadius` (20px) of a
+  handle. It had never been a valid gesture.
+- The auto-layout spec asserted `before !== after` around a bare Auto-layout click on a
+  sample that ships already laid out, so it asserted nothing.
+- And then, once it did assert something, it found that **auto-layout is broken outright**.
+
+The same reasoning applies to the other coverage exclusion nobody had checked:
+`src/layout/worker/**` is excluded because it "constructs a real Worker and dynamically
+imports elkjs" — and nothing had ever constructed that Worker in a browser. It does not
+work. Treat every remaining exclusion in `vite.config.ts` as unverified until an e2e spec
+covers it.
+
+The architecture is not the problem and does not need rework. Enforced layer boundaries,
+patch-derived undo inverses, schema-as-source-of-truth, WeakMap-cached derivations: every
+fix on 10 Sep was a few lines _because_ the structure held. The quality effort simply went
+almost entirely into the layers a unit test can reach.
+
+---
+
+## Tier 1 — make it work at all
+
+### 1. Auto-layout is broken in the browser
+
+**This is now the top of the queue, and it is bigger than it looks: it takes the product's
+strongest claim with it.** `docs/SRS.md` and this file both describe "SQL DDL to
+auto-layout in one click" as the best path through the tool. The layout half of it has
+never worked in a browser.
+
+**Already established — do not redo this:**
+
+- Clicking **Auto-layout** throws and moves nothing. `_Worker is not a constructor` in dev,
+  `o is not a constructor` in the minified production build. It surfaces in the UI as a
+  `role="alert"` banner, so it is at least not silent.
+- **The production build is affected too**, not just the dev server. Confirmed against
+  `vite preview`.
+- **Importing a `.sql` file leaves the schema on the placeholder grid.** `Editor.tsx` calls
+  `autoLayout.run()` after an import, and it throws. Measured: a 3-table SQL file imports
+  to `translate(0px, 0px)`, `translate(280px, 0px)`, `translate(560px, 0px)` — exactly
+  `fallbackPosition`'s `GRID_X = 280` grid, before and after clicking Auto-layout. It looks
+  plausible on a 3-table chain only because the placeholder grid is also a row; it will look
+  like a grid of unrelated boxes on anything real.
+- **The cause, at the line.** `elkjs/lib/elk-worker.js` decides what it is by environment:
+
+  ```js
+  if (typeof document === 'undefined' && typeof self !== 'undefined') {
+    self.onmessage = dispatcher.saveDispatch // "I am the worker body"
+  } else if (typeof module !== 'undefined' && module.exports) {
+    module.exports = { default: FakeWorker, Worker: FakeWorker }
+  }
+  ```
+
+  Inside a real Web Worker the first branch wins, so nothing is exported. But
+  `elk.bundled.js` — which `layout.worker.ts` imports — does this when no `workerFactory`
+  is supplied:
+
+  ```js
+  var _require = require('./elk-worker.min.js'),
+    _Worker = _require.Worker
+  optionsClone.workerFactory = function (url) {
+    return new _Worker(url)
+  }
+  ```
+
+  `_Worker` is `undefined`, and `new ELK()` throws at worker module top level. So
+  `elk.bundled.js` **cannot be used inside a Web Worker at all**: it is the main-thread
+  build, whose whole job is to start a worker of its own.
+
+**Recommended fix — let elkjs own the thread.** `elk-worker.min.js` is _designed_ to be the
+worker body, so the hand-written wrapper is the thing to remove rather than repair:
+
+```ts
+import ELK from 'elkjs/lib/elk-api.js'
+import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url'
+
+// Classic worker, not `{ type: 'module' }` — elk-worker.min.js is a browserify UMD bundle.
+const elk = new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })
+```
+
+That deletes `layout.worker.ts`, `protocol.ts` and most of `client.ts`, and keeps NFR-1.4
+(layout off the main thread) and NFR-1.8 (elkjs not in the main bundle — check the built
+chunks to confirm the second one still holds). Worth confirming the approach before
+building, since it changes what ADR-0002 describes.
+
+Whatever the fix, **the acceptance test already exists**: `tests/e2e/smoke.spec.ts` has the
+auto-layout spec marked `test.fail()`. Remove the marker as part of the fix; the suite goes
+red on its own if you forget, because Playwright reports an expected failure that passes.
+Add one for the import path too — a `.sql` import must not land on the 280px grid.
+
+### 2. Run one real schema through it
+
+Was Tier 2 item 5. Promoted, because two of the three bugs found on 10 Sep were invisible on
+the sample: auto-layout looks like it works on a 3-table chain, and the four-box sample
+never showed how much of the canvas the inspector and minimap cover.
+
+`docs/SRS.md` §13.1 already admits every performance figure comes from synthetic fixtures
+with uniform table sizes and tidy relationships. A real dump — 60-column tables, 200 foreign
+keys into one table, names like `tbl_cust_hist_2019` — will teach more in five minutes than
+another week of synthetic testing. The width estimates in `measure.ts` are exactly the kind
+of thing it should break, and there is a no-overlap test that will say so. Do this after
+item 1, since a real schema without working auto-layout only shows the placeholder grid.
+
+## Tier 2 — make it actually useful
+
+### 3. Re-import onto an existing diagram, preserving layout
+
+The item that changes what the tool is. Import currently replaces the document wholesale.
+What is needed: import a `.sql` or `.mmd` over the _current_ diagram, match entities by
+name (importers regenerate ids, so name is the only join key), keep the positions of
+everything that still exists, place only genuinely new entities, and report what was added,
+removed and changed. One undo step.
+
+Worth designing properly. It needs a decision on what happens to a renamed table (which
+looks identical to a delete plus an add), and probably wants the diff shown before it is
+applied.
+
+## Tier 3 — the features that matter at 100+ tables
+
+In order:
+
+4. **Search and command palette** (FR-2.6, FR-9.2). At 100 tables, "find CUSTOMER" is worth
+   more than everything else unbuilt. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026
+   after sitting unused through six stages; re-add them when this starts, or decide that a
+   substring match over a hundred table names does not need a fuzzy-search library.
+5. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+   leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
+   than one screen.
+6. **Stop rebuilding every node object on hover.** The performance half of the
+   click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
+   split-store note already promises ("hover is separated _so that_ it does not re-render
+   every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
+   rebuilds all N nodes through the `baseNodes` memo on every hover. Not a correctness bug
+   any more — carrying `measured` made rebuilds harmless — so this is now purely about not
+   doing O(entities x attributes) work per hover at 120 tables. The move is to have
+   `EntityNode` subscribe to trace state by its own id instead of receiving it in
+   `node.data`. Measure first: at four entities it is free, and the cost has never been
+   measured at scale.
+7. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+   shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
+   `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
+   "N more" row.
+
+---
+
+## Not doing, and why
+
+- **Chen mode** (FR-5.3 to FR-5.7). Five requirements and a second rendering surface, for a
+  notation the SRS's own §2 argues against at scale. If it is ever built, build the focused
+  sub-view (FR-5.4) only.
+- **N-ary relationships, ISA hierarchies, subject areas.** Correctly parked as V2 with slots
+  reserved in the IR. Adding one means touching the schema, every adapter's capability set,
+  and the renderer.
+- **A backend.** V1 is deliberately offline with no server (SRS §1.2), and that constraint is
+  one of the three things that makes the tool distinctive. Do not add one without discussing
+  it first.
+
+---
+
+## Housekeeping worth doing while nearby
+
+- **~~The SRS status table is stale on FR-8.1/FR-8.2.~~ Done** — those rows and §13 now read
+  correctly. The auto-layout rows (FR-3.1, FR-3.2, FR-3.4, FR-6.8, NFR-1.4) were corrected
+  the same way on 10 Sep 2026: every one said "Done" for a feature that throws in every
+  browser. Worth remembering why, because it will happen again — the table is written from
+  what the unit suite proves, so a row can be entirely honest about the code and still be
+  wrong about the product.
+- **`tests/unit/domain/validation.test.ts` holds a wall-clock assertion**
+  (`expect(perRun).toBeLessThan(16)`) that failed once under 28-way worker contention and
+  passed on retry. By this project's own convention that belongs in `pnpm test:perf`, not the
+  gate. Left alone deliberately, so it does not look like a gate was weakened to go green —
+  but it will flake again.
+- **A possible selection race.** While writing a test on 10 Sep, `selectedEntityIds` was
+  occasionally empty immediately after "Add your first entity" under coverage
+  instrumentation, meaning a newly added entity is sometimes not selected and the inspector
+  does not open. Only reproduced under slow timing. It was suspected of sharing a cause with
+  the click-to-select bug; that one is now fixed and this has not been seen again, so retest
+  before spending time on it.
+
+- **"Saved" is displayed before anything is saved.** Measured in Chrome: the indicator reads
+  "Saved" — never "Saving…", no `data-dirty` — for the whole ~640 ms between the sample
+  appearing on screen and the row reaching IndexedDB, because opening a diagram never marks
+  the store dirty while autosave's 800 ms debounce runs. A reload or a closed tab inside that
+  window loses the document while the UI claims it is safe. `Autosaver` and the `isDirty`
+  wiring are both fine in isolation; what is missing is that opening a document should mark
+  it unsaved. The e2e suite works around it with `waitForPersisted` in `tests/e2e/helpers.ts`
+  rather than trusting the indicator.
+
+- **The inspector panel is drawn over the canvas, not beside it.** At both 1280x720 and
+  1400x900, selecting anything puts the panel on top of the two right-hand tables of the
+  four-box sample: `document.elementFromPoint` on their headers returns
+  `erd-inspector__section`, and they cannot be clicked or connected. On a wide schema this
+  hides real work behind the panel that just opened. Either lay the panel out beside the
+  canvas so React Flow's container shrinks (and let `fitView` frame the smaller area), or
+  inset the viewport by the panel width while it is open. The e2e specs avoid it by
+  multi-selecting only the two left-hand tables; `coldClick` in `tests/e2e/helpers.ts`
+  asserts its target is topmost, which is how this surfaced.
+
+- **The minimap steals pointer events from the bottom-right of the canvas.** At 1280x720 it
+  sits on PRODUCT's connection handle in the sample, so that table cannot be connected at
+  all — which is why `playwright.config.ts` runs at 1400x900 and says so. Standard for an
+  overlay minimap, but it wants either a way to hide it (there is no UI toggle, only the
+  `showMinimap` prop) or a smaller footprint.
+
+---
+
+## How to drive the real app
+
+**Start with `pnpm test:e2e`.** The suite runs now, covers the pointer gestures, and is part
+of `pnpm verify`; a one-off driver script is for exploring something the suite does not
+cover yet. `tests/e2e/helpers.ts` already has `entity()`, `openSample()`, `coldClick()` and
+`waitForPersisted()`, and each carries the reason it is shaped the way it is.
+
+Everything below is hard-won on 10 Sep 2026. Without it you will spend an hour
+rediscovering it.
+
+```bash
+npx vite --port 5173 --strictPort &
+until curl -sf http://localhost:5173 >/dev/null; do sleep 1; done
+```
+
+Stop it by **PID**, not by killing the npm wrapper — that leaves the listener alive and the
+next run hits a port clash:
+
+```bash
+netstat -ano | grep ":5173.*LISTENING"   # PID is the last column
+```
+
+Driving it:
+
+- **There is no `chromium-cli` on this machine and no Playwright browsers installed.** Use
+  the system Chrome: `chromium.launch({ channel: 'chrome', headless: true })`. Avoids the
+  ~150 MB download and works today. `playwright.config.ts` does the same with
+  `channel: 'chrome'`, which is why `pnpm test:e2e` needs no install step.
+- **Open the sample first.** A fresh browser profile boots to the empty state, not to a
+  diagram. Click "Open the sample schema" or nothing will be on the canvas.
+- **A driver script outside the project cannot resolve `@playwright/test`.** Import it by
+  absolute path to
+  `node_modules/.pnpm/@playwright+test@<version>/node_modules/@playwright/test/index.js` —
+  and it is CommonJS, so use a default import and destructure `chromium` from it.
+- **Chrome has `showSaveFilePicker`, and Playwright cannot drive a native OS save dialog.**
+  Delete it in an init script to force the object-URL download path:
+  `await context.addInitScript(() => { delete window.showSaveFilePicker })`. Consequence:
+  the File System Access branch of `saveBlobFile` is exercised by nothing at all.
+- **The export surface unmounts as soon as the blob is saved**, well under a second. To
+  inspect it, poll from inside the page with `requestAnimationFrame` and stash the result on
+  `window`, rather than reading the DOM from the driver after a `waitForTimeout`.
+- **Look at the image.** Every image-export bug found produced a valid file of the right
+  size with the right background colour. Byte counts and dimensions prove nothing.
+
+Interaction-specific, learned while fixing click-to-select:
+
+- **`locator.click()` cannot catch a visibility bug.** Playwright's actionability checks
+  wait for the element to be visible before pressing, so a box that is `visibility: hidden`
+  for 19 ms is politely waited out and the click passes. Every timing bug on this canvas
+  needs raw `mouse.move` / `mouse.down` / `mouse.up` with **no pause between the move and
+  the press** — which is also what a person does. See `coldClick`.
+- **A single `mouse.move` between down and up is not a drag.** It registers as nothing.
+  Send several small steps.
+- **Assert the thing you are about to click is actually on top.** `document.elementFromPoint`
+  plus `closest('.react-flow__node')` turns "the click silently went somewhere else" into a
+  named failure. Both the inspector panel and the minimap cover parts of the canvas, so this
+  is not hypothetical.
+- **`hasText` is a substring match over the whole box.** `hasText: 'CUSTOMER'` matches the
+  ORDER box too, because ORDER has a `customer_id` field. Anchor on `.erd-node__name` with a
+  whole-string regex — `entity()` does.
+- **`test.fail()` outside a test body marks every test in the file.** It has to be the first
+  statement _inside_ the test.
+- **Do not wait on the "Saved" indicator to mean saved.** It does not. Poll IndexedDB —
+  `waitForPersisted` does — and see Housekeeping for why.

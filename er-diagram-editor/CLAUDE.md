@@ -15,12 +15,13 @@ throughout the source — when you touch code that cites one, read it.
 ## Commands
 
 ```bash
-pnpm verify        # typecheck + lint + test + build. Run this before saying you are done.
+pnpm verify        # typecheck + lint + test + build + e2e. Run before saying you are done.
 pnpm dev
-pnpm test          # unit only, ~30s
-pnpm test:coverage # enforces 80%; the build fails below it
+pnpm test          # unit only, ~55s on this machine
+pnpm test:coverage # enforces 80%; NOT part of verify — run it yourself
 pnpm test:perf     # layout budgets, slow, run when touching layout or measurement
-pnpm test:e2e      # needs `pnpm exec playwright install chromium` first
+pnpm test:e2e      # 14 specs on the system Chrome, ~40s. No browser install needed:
+                   # playwright.config.ts sets `channel: 'chrome'`. Part of verify.
 ```
 
 `pnpm verify` must pass. Do not weaken a lint rule, a type, or a coverage threshold to
@@ -34,17 +35,10 @@ ui  ←  features  ←  store  ←  domain
              render  ←──── io, layout
 ```
 
-- `domain/` — pure TypeScript. No React, no DOM, no rendering library. Unit-testable
-  under plain Node. This is where the model, the commands and the graph queries live.
-- `io/` — import/export adapters. Imports `domain` only.
-- `layout/` — elkjs, behind an interface. Imports `domain` only.
-- `render/` — React Flow canvas and notation. Imports `domain` and `layout`.
-- `persistence/` — Dexie/IndexedDB. Imports `domain` and `io`.
-- `store/` — Zustand. Imports `domain` and `persistence`.
-- `features/` — may import anything below it.
-- `lib/` and `ui/` — leaves, importable anywhere, importing nothing but each other.
+Each layer's exact allowed imports are the `ALLOWED` map in `eslint.config.js`, with the
+reasoning at the point of denial.
 
-**This is enforced by ESLint and by 48 tests** in `tests/unit/architecture/`. Both the
+**This is enforced by ESLint and by 49 tests** in `tests/unit/architecture/`. Both the
 relative form (`../render/x`) and the alias form (`@/render/x`) are checked, because the
 first rule alone silently misses the second.
 
@@ -101,6 +95,18 @@ catches this.
 Editing callbacks reach canvas nodes through **context**, not `node.data`. React Flow
 rebuilds `data` on every change; callbacks there defeat the `memo` on `EntityNode`.
 
+**Do not subscribe to the viewport from `features`.** `x`/`y`/`zoom` change on every frame
+of a pan, so a selector on them re-renders the editor and re-runs the canvas's node and
+edge memos at pointer rate — the exact cost that splitting the viewport into its own store
+exists to avoid. Read it imperatively where it is needed: `handleAddEntity` in `Editor.tsx`
+calls `useViewportStore.getState()` inside the callback, and says why.
+
+**Culling is why image export has its own canvas.** `onlyRenderVisibleElements` means
+off-screen nodes are ABSENT from the DOM, not clipped, so rasterising the live canvas
+produces a picture of one screenful. `features/export/ExportSurface.tsx` mounts a second,
+off-screen `Canvas` with `cull={false}` for this. It is the only caller allowed to turn
+culling off.
+
 ## Things that have gone wrong before
 
 - **Counting Immer patches to detect a no-op.** The `updatedAt` stamp emits no patch when
@@ -114,13 +120,83 @@ rebuilds `data` on every change; callbacks there defeat the `memo` on `EntityNod
 - **A test that reimplemented the code it tested.** `connect.test.ts` copy-pasted logic out
   of `Editor.tsx` and would have passed forever. Extract and import the real thing.
 - **Substring assertions on generated Mermaid.** They pass happily on a file Mermaid
-  rejects. `tests/unit/io/mermaid.test.ts` runs the real parser. Keep it that way.
-- **A tar extract leaving a renamed file behind.** `tests/unit/architecture/no-stale-files.test.ts`
-  catches this. Not relevant once the project is in git.
+  rejects. `tests/unit/io/mermaid.test.ts` runs the real parser. Keep it that way. This is
+  also why `mermaid` is still in `devDependencies` after being dropped from the bundle —
+  it is a test dependency, not dead weight.
+- **`useEffect(..., [props])`.** Both dialogs registered their Escape listener this way.
+  `props` is a fresh object every render, so the listener was torn down and re-added on
+  every keystroke anywhere in the tree. Depend on the field you use, not on `props`.
+- **`aria-modal="true"` on a panel with no focus trap.** It announces a boundary that does
+  not exist. Modals go through `ui/Dialog` now; do not hand-roll another one.
+- **A window-level keydown listener with a modal open.** A focus trap cannot reach it, so
+  `e` and `Delete` were still editing the document behind the export dialog. The keymap in
+  `Editor.tsx` returns early while `activeDialog` is set.
+- **Assuming React Flow applies its own drag.** It does not, in controlled mode — it only
+  REPORTS the drag and the consumer must apply it. `settledPositions` dropped every
+  in-flight frame on the stated grounds that "React Flow holds the in-flight position
+  itself"; that is true of uncontrolled mode only, so nothing applied it and a dragged box
+  sat frozen under the cursor until release. A drag now has **two tiers** — in-flight
+  positions in local component state, the settled one through the command stack. The note
+  is in `trace.ts`.
+  - The unit tests all passed. `settledPositions` did exactly what its own tests asked, and
+    no test asked whether anything consumed the frames it dropped. A per-function test
+    cannot catch a gap BETWEEN two functions; the pair now has its own test.
+- **Dropping React Flow's `dimensions` changes.** They were declined on the stated grounds
+  that dimensions are "derived from the model". They are not — they are measured from the
+  DOM, and `applyNodeChanges` writes them back as `node.measured`. React Flow re-adopts
+  nodes by **reference equality**, so every rebuild of the node array handed it objects with
+  no `measured` and it forgot the size it had just reported. Consequences, neither of which
+  looks like a dimensions bug:
+  - `NodeWrapper` renders `visibility: hasDimensions ? 'visible' : 'hidden'`, so every box
+    went invisible for ~19 ms after any rebuild — hover, selection, LOD, any edit. A click
+    inside that window was never hit-tested against the node; it landed on the pane, so
+    `onPaneClick` fired and **clicking a table cleared the selection instead of making
+    one**.
+  - The minimap reads the **user** node's size, not the internal one, so
+    `nodeHasDimensions` was false forever and it drew nothing at all. The `nodeColor` prop
+    is about fill colour and was never the reason it looked empty.
+  - There are now three tiers in `trace.ts`, not two, and a test on the trio: every change
+    React Flow emits must be claimed by exactly one of them. Same shape of gap as the drag
+    teleport above — each function was right on its own, and nothing asked what happened to
+    what they declined.
+- **`elkjs/lib/elk.bundled.js` cannot run inside a Web Worker.** It is the main-thread
+  build, and its job is to start a worker of its own: with no `workerFactory` it does
+  `require('./elk-worker.min.js').Worker`, and `elk-worker.min.js` decides what to be from
+  `typeof document === 'undefined' && typeof self !== 'undefined'` — true inside a worker, so
+  it installs itself as the worker body and exports nothing. `new ELK()` then throws
+  `_Worker is not a constructor` at worker module top level. Auto-layout has therefore never
+  worked in a browser, in dev or in production, while `pnpm test:perf` happily measured the
+  algorithm in-process on the test thread. Let elkjs own the thread instead: main-thread
+  `new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })` with
+  `elk-worker.min.js?url`, as a **classic** worker — it is a browserify UMD bundle, so
+  `{ type: 'module' }` will not load it. See `NEXT.md` Tier 1.
+- **Playwright's `locator.click()` cannot catch a visibility bug**, because its actionability
+  checks wait for the element to be visible before pressing. The 19 ms window above is
+  politely waited out and the click passes. Interaction specs on this canvas use raw
+  `mouse.move` / `down` / `up` with no pause between the move and the press — see
+  `coldClick` in `tests/e2e/helpers.ts`. Related: `test.fail()` outside a test body marks
+  every test in the file.
+- **Three separate ways to ship a broken image export.** All three produced a file, none
+  threw, and all three passed every check a unit test can make. See `docs/SRS.md` §13.1.
+  - `useStore(s => s.nodesInitialized)` is a **stale flag**. React Flow recomputes it only
+    in `setNodes` — before measurement — and never again. Derive from `nodeLookup`, which
+    measurement does update (`updateNodeInternals` calls `set({})` for exactly this).
+  - **html-to-image carries the captured element's own computed styles into the clone.**
+    Capturing the off-screen wrapper took `left: -100000px` with it and produced a blank
+    image. Capture a statically positioned child; that is why `ExportSurface` has two divs.
+  - **html-to-image styles `HTMLElement` only, and `SVGElement` is not one.** All SVG in a
+    capture loses its CSS and falls back to `fill: black`. `inlineSvgPresentation` in
+    `io/formats/image/export.ts` copies it across by hand.
 
 ## Testing conventions
 
-- DOM-free suites declare `@vitest-environment node` at the top. jsdom costs ~1s per file.
+- **The suite default is `node`.** Files that mount components opt back UP with
+  `@vitest-environment jsdom` on line 1. It used to be the other way round, and all 24
+  files paid for jsdom whether they touched the DOM or not. Note what this did and did not
+  buy: ~110s of aggregate environment setup and the memory of 16 needless jsdom instances,
+  but almost nothing on the wall clock — those setups ran in parallel across workers, and
+  the run is dominated by per-file worker spawn. Do not expect the run to get faster;
+  expect it not to get slower as suites are added.
 - Vitest takes `*.test.ts`; Playwright takes `*.spec.ts`. They must not overlap.
 - Non-null assertions are allowed **in tests only** — there, `entities[0]!` _is_ the
   assertion. `src/` keeps the rule.
@@ -129,39 +205,22 @@ rebuilds `data` on every change; callbacks there defeat the `memo` on `EntityNod
 - Coverage exclusions in `vite.config.ts` each carry a reason. Not-yet-written modules are
   listed individually so the gate rises as they land, rather than being lowered to
   accommodate them.
-
-## Current state
-
-Working: entity/attribute/relationship authoring (drag, click-to-connect, or panel),
-undo/redo, auto-layout (elkjs in a worker, lazy-loaded), zoom-driven LOD, hover-to-trace
-highlighting, autosave and session recovery, multiple saved diagrams, export to Mermaid
-and native JSON, import from `.sql` (PostgreSQL/MySQL), `.mmd` and `.erd.json`.
-
-~535 tests, ~91% coverage.
+- **An exclusion that defers to `tests/e2e` is a promise, so check the promise is kept.**
+  Both of the standing ones turned out to be empty: `Canvas.tsx` deferred pointer behaviour
+  to a suite that had never been executed (five interaction bugs shipped under it), and
+  `src/layout/worker/**` was excluded because it "constructs a real Worker" — which does not
+  work. If you exclude a module, add the e2e spec in the same change.
 
 ## What to do next
 
-In priority order, with the reasoning:
+**Read `NEXT.md` first.** It is the working queue: what is broken right now, what has
+already been diagnosed (so you do not redo it), the tiers in priority order with the
+reasoning, and the recipe for driving the real app in a browser. Update it when you finish
+something.
 
-1. **Validation panel.** `domain/validation/` has `Rule.ts`, `validator.ts` and five rule
-   files as stubs; the panel at `features/validation-panel/` is a stub too. FR-8.1 to
-   FR-8.4. Highest value because the code already "knows" about problems the user cannot
-   see — an unnamed field, a missing primary key, an orphan table.
-2. **Search / command palette (`Ctrl+K`).** FR-2.6, FR-9.2. `fuse.js` and `cmdk` are
-   already dependencies. At 100 tables this is worth more than everything below it.
-3. **Edges attaching to the FK row** rather than box centres. Per-row handles exist but
-   edges ignore them; needs a fallback for L0/L1 where those handles are not rendered.
-4. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
-   tested, just unwired); expanding one entity via the "N more" row; PNG/SVG export
-   (FR-6.5); DBML export (one directory plus a registry line).
-
-Deferred to V2 by design, with slots reserved in the IR: n-ary relationships, ISA
-hierarchies, subject areas, snapshots and diff.
-
-**Two caveats worth acting on early.** Nothing has been tested against a real 100-table
-schema — the performance fixtures are synthetic, with uniform table sizes and tidy
-relationships. And `pnpm test:e2e` has never actually been executed; four tests are
-written and waiting on `playwright install`.
+`docs/SRS.md` §13 remains the requirement-level view of what is unbuilt, and §13.1 holds
+the standing caveat that nothing has been tested against a real schema. Requirement status
+lives in the SRS; sequencing lives in `NEXT.md`. Do not start a third list.
 
 ## Where the reasoning lives
 
@@ -170,4 +229,7 @@ written and waiting on `playwright install`.
   pattern, LOD rendering, the Stage 1 version deviations, the repository seam.
 - `docs/mermaid-mapping.md` — what Mermaid export can and cannot represent.
 - `docs/adding-a-format.md` — the recipe for a new import/export adapter.
+- `docs/SRS.md` §7.3 — why image export does not fit the `ExportAdapter` interface, and why
+  that is deliberate rather than a leak.
+- `NEXT.md` — the working queue: what is broken, what is diagnosed, what to do next.
 - `UPGRADING.md` — scripts and the stale-file hazard.
