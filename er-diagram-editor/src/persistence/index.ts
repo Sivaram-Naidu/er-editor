@@ -5,6 +5,7 @@ export {
   DexieDiagramRepository,
   InMemoryDiagramRepository,
   LAST_OPENED_KEY,
+  THEME_KEY,
   createRepository,
   hasIndexedDb,
   resetSharedRepository,
@@ -16,8 +17,10 @@ export {
 export {
   hasFileSystemAccess,
   openTextFile,
+  saveBlobFile,
   saveTextFile,
   type OpenedFile,
+  type SaveBlobOptions,
   type SaveFileOptions,
 } from './fileSystem'
 export {

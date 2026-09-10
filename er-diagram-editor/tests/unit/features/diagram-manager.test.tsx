@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Mounts the diagram menu and clicks it. The suite default is `node` (see the note in vite.config.ts), so a file that
+ * mounts anything has to opt back up here.
+ */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
@@ -107,16 +113,58 @@ describe('diagram menu', () => {
     expect(screen.getByText(/Nothing else saved yet/)).toBeInTheDocument()
   })
 
-  it('deletes a saved diagram', async () => {
+  it('deletes a saved diagram, once the deletion is confirmed', async () => {
     await sharedRepository().put(createDiagram({ name: 'Disposable' }))
     await boot()
     fireEvent.click(screen.getByRole('button', { name: /Untitled diagram/ }))
     await screen.findByRole('button', { name: /^Disposable/ })
 
+    // The × only asks. Removing a saved diagram is a row in IndexedDB rather than a
+    // document edit, so undo cannot reach it and the confirmation is the only guard.
     fireEvent.click(screen.getByRole('button', { name: 'Delete Disposable' }))
+    expect(screen.getByRole('button', { name: /^Disposable/ })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm deleting Disposable' }))
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /^Disposable/ })).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps the diagram when the deletion is declined', async () => {
+    await sharedRepository().put(createDiagram({ name: 'Keeper' }))
+    await boot()
+    fireEvent.click(screen.getByRole('button', { name: /Untitled diagram/ }))
+    await screen.findByRole('button', { name: /^Keeper/ })
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Keeper' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Keep Keeper' }))
+
+    expect(screen.getByRole('button', { name: /^Keeper/ })).toBeInTheDocument()
+    const stored = await sharedRepository().list()
+    expect(stored.map((summary) => summary.name)).toContain('Keeper')
+    // Back to asking, not stuck mid-question.
+    expect(screen.getByRole('button', { name: 'Delete Keeper' })).toBeInTheDocument()
+  })
+
+  it('Escape backs out of a pending deletion before it closes the menu', async () => {
+    // One keystroke must not do both, or the user cannot tell which of the two it did.
+    await sharedRepository().put(createDiagram({ name: 'Survivor' }))
+    await boot()
+    fireEvent.click(screen.getByRole('button', { name: /Untitled diagram/ }))
+    await screen.findByRole('button', { name: /^Survivor/ })
+    fireEvent.click(screen.getByRole('button', { name: 'Delete Survivor' }))
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    // The question is withdrawn and the menu is still open.
+    expect(screen.getByRole('button', { name: 'Delete Survivor' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Diagram name')).toBeInTheDocument()
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Diagram name')).not.toBeInTheDocument()
     })
   })
 

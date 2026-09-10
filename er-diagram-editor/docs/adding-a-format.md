@@ -11,6 +11,18 @@ The NFR-6.4 recipe: one new directory plus one registry line.
 Nothing in `domain/`, `render/`, `store/` or `features/` should change. If it does,
 the abstraction has leaked - fix that rather than working around it.
 
+## The one format that does not follow this recipe
+
+Image export (PNG/SVG) does not, and cannot. Its input is a rendered DOM subtree rather
+than a `Diagram`, so it implements `ImageExportAdapter` and lives in its own registry list
+(`imageExportAdapters`) instead of `exportAdapters`. It also needs a component in
+`features/export/` — the off-screen surface that renders the whole diagram — which is
+exactly the "no changes outside io/" rule broken.
+
+That is a real exception, not a precedent. The reasoning is in `docs/SRS.md` §7.3. If a
+format you are adding turns the model into text or bytes, this recipe applies; if it needs
+to photograph the renderer, read §7.3 first.
+
 ## As built
 
 Exporters: `native-json` (lossless), `mermaid`.

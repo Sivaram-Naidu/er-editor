@@ -21,15 +21,24 @@ import {
   type Point,
   type RelationshipId,
 } from '../../domain'
+import { measureEntity } from '../../layout'
 import { Canvas, EditorActionsProvider, type EditorActions } from '../../render'
 import { DiagramMenu, useDiagramLibrary } from '../diagram-manager'
 import { ExportDialog } from '../export'
 import { ImportDialog } from '../import'
 import { InspectorPanel } from '../inspector'
-import { useDiagramStore, useSelectionStore, useUiStore, useViewportStore } from '../../store'
+import { ValidationPanel, ValidationToggle, useValidationReport } from '../validation-panel'
+import {
+  useDiagramStore,
+  useSelectionStore,
+  useUiStore,
+  useViewportStore,
+  viewportCenter,
+} from '../../store'
 
 import { EmptyState } from './EmptyState'
 import { buildConnectCommands } from './connect'
+import { placeNewEntity } from './placement'
 import { useAutoLayout } from './useAutoLayout'
 import { Toolbar } from './Toolbar'
 import { buildSampleDiagram } from './sample'
@@ -40,6 +49,7 @@ export function Editor(): React.ReactElement {
   const diagram = useDiagramStore((state) => state.diagram)
   const history = useDiagramStore((state) => state.history)
   const isDirty = useDiagramStore((state) => state.isDirty)
+  const saveError = useDiagramStore((state) => state.saveError)
   const execute = useDiagramStore((state) => state.execute)
   const transaction = useDiagramStore((state) => state.transaction)
   const undo = useDiagramStore((state) => state.undo)
@@ -62,11 +72,20 @@ export function Editor(): React.ReactElement {
   const lodOverride = useViewportStore((state) => state.lodOverride)
   const setLodOverride = useViewportStore((state) => state.setLodOverride)
   const setViewport = useViewportStore((state) => state.setViewport)
+  const setPaneSize = useViewportStore((state) => state.setPaneSize)
+
+  const revealRequest = useViewportStore((state) => state.revealRequest)
 
   const minimapOpen = useUiStore((state) => state.minimapOpen)
+  const validationPanelOpen = useUiStore((state) => state.validationPanelOpen)
+  const toggleValidationPanel = useUiStore((state) => state.toggleValidationPanel)
   const activeDialog = useUiStore((state) => state.activeDialog)
   const openDialog = useUiStore((state) => state.openDialog)
   const closeDialog = useUiStore((state) => state.closeDialog)
+
+  // Cheap: memoised on the diagram object inside the validator, so this and the toolbar
+  // badge and the panel all share one computation per edit.
+  const validation = useValidationReport()
 
   // Selection can outlive what it points at — after a delete, and after an undo of an
   // add. Reconciling here keeps that in one place instead of at every call site.
@@ -77,11 +96,36 @@ export function Editor(): React.ReactElement {
     )
   }, [diagram, reconcile])
 
+  /**
+   * Add an entity where the user is looking (FR-1.1), rather than at a grid slot.
+   *
+   * Both stores are read imperatively with `getState()` here instead of through the
+   * selectors above, and that is deliberate on two counts.
+   *
+   * The viewport: subscribing to `x`/`y`/`zoom` would re-render this component — and so
+   * re-run the canvas's node and edge memos — on every frame of every pan, which is the
+   * exact cost that splitting the viewport out of the model store exists to avoid.
+   *
+   * The positions: they change on every frame of every drag, so taking them as a
+   * dependency would rebuild this callback at pointer rate — and it is a dependency of
+   * the keymap effect below, so the window listener would be torn down and re-added with
+   * it. Both values are needed only at the instant of the click, so both are read then.
+   */
   const handleAddEntity = useCallback(() => {
-    const entity = createEntity({ name: `ENTITY_${String(diagram.entities.length + 1)}` })
-    execute(addEntity(entity))
+    const current = useDiagramStore.getState().diagram
+    const entity = createEntity({ name: `ENTITY_${String(current.entities.length + 1)}` })
+
+    const position = placeNewEntity({
+      center: viewportCenter(useViewportStore.getState()),
+      // A brand-new entity has no attributes, so this is the same size at every level of
+      // detail. Passing the level the user is on anyway keeps it correct if that changes.
+      size: measureEntity(entity, lodOverride ?? lod),
+      taken: Object.values(current.layout.positions),
+    })
+
+    execute(addEntity(entity, position))
     selectEntities([entity.id])
-  }, [diagram.entities.length, execute, selectEntities])
+  }, [lod, lodOverride, execute, selectEntities])
 
   const handleAddRelationship = useCallback(() => {
     const [from, to] = [...selectedEntityIds]
@@ -176,6 +220,13 @@ export function Editor(): React.ReactElement {
   // NFR-3.2: every mouse action is reachable by keyboard.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      // A modal dialog is modal for the keyboard too. `ui/Dialog` traps Tab, but a
+      // window-level keydown listener sits outside anything a focus trap can reach — so
+      // with the export dialog open, pressing `e` added an entity to the document behind
+      // it and `Delete` deleted the selection out from under the preview the user was
+      // reading.
+      if (activeDialog !== undefined) return
+
       const target = event.target
       const isTyping =
         target instanceof HTMLElement &&
@@ -219,7 +270,15 @@ export function Editor(): React.ReactElement {
     return () => {
       globalThis.removeEventListener('keydown', onKeyDown)
     }
-  }, [undo, redo, handleAddEntity, handleAddRelationship, handleDeleteSelection, selectEntities])
+  }, [
+    activeDialog,
+    undo,
+    redo,
+    handleAddEntity,
+    handleAddRelationship,
+    handleDeleteSelection,
+    selectEntities,
+  ])
 
   const autoLayout = useAutoLayout({ diagram, lod: lodOverride ?? lod, execute })
   const library = useDiagramLibrary(diagram.id)
@@ -267,6 +326,7 @@ export function Editor(): React.ReactElement {
         lod={lod}
         lodOverride={lodOverride}
         isDirty={isDirty}
+        saveError={saveError}
         onAddEntity={handleAddEntity}
         onAddRelationship={handleAddRelationship}
         onDeleteSelection={handleDeleteSelection}
@@ -274,6 +334,7 @@ export function Editor(): React.ReactElement {
         onRedo={redo}
         onSetLodOverride={setLodOverride}
         diagramMenu={diagramMenu}
+        validationToggle={<ValidationToggle />}
         onExport={() => {
           openDialog('export')
         }}
@@ -288,37 +349,52 @@ export function Editor(): React.ReactElement {
       />
 
       <div className="erd-body">
-        <main className="erd-main">
-          {isEmpty ? (
-            <EmptyState
-              onAddEntity={handleAddEntity}
-              onLoadSample={() => {
-                load(buildSampleDiagram())
-              }}
-            />
-          ) : (
-            <EditorActionsProvider value={editorActions}>
-              <Canvas
-                diagram={diagram}
-                lod={effectiveLevel}
-                hoveredEntityId={hoveredEntityId}
-                hoveredRelationshipId={hoveredRelationshipId}
-                selectedEntityIds={selectedEntityIds}
-                selectedRelationshipIds={selectedRelationshipIds}
-                selectedAttributeId={selectedAttributeId}
-                editable
-                onHoverEntity={setHoveredEntity}
-                onHoverRelationship={setHoveredRelationship}
-                onSelectEntities={handleSelect}
-                onSelectRelationship={handleSelectRelationship}
-                onConnect={handleConnect}
-                onMoveEntities={handleMove}
-                onViewportChange={setViewport}
-                showMinimap={minimapOpen}
+        {/* Canvas and the problems strip share a column, so the strip sits under the
+            drawing and the inspector stays full height beside both. */}
+        <div className="erd-canvas-column">
+          <main className="erd-main">
+            {isEmpty ? (
+              <EmptyState
+                onAddEntity={handleAddEntity}
+                onLoadSample={() => {
+                  load(buildSampleDiagram())
+                }}
               />
-            </EditorActionsProvider>
+            ) : (
+              <EditorActionsProvider value={editorActions}>
+                <Canvas
+                  diagram={diagram}
+                  lod={effectiveLevel}
+                  hoveredEntityId={hoveredEntityId}
+                  hoveredRelationshipId={hoveredRelationshipId}
+                  selectedEntityIds={selectedEntityIds}
+                  selectedRelationshipIds={selectedRelationshipIds}
+                  selectedAttributeId={selectedAttributeId}
+                  editable
+                  onHoverEntity={setHoveredEntity}
+                  onHoverRelationship={setHoveredRelationship}
+                  onSelectEntities={handleSelect}
+                  onSelectRelationship={handleSelectRelationship}
+                  onConnect={handleConnect}
+                  onMoveEntities={handleMove}
+                  onViewportChange={setViewport}
+                  onPaneResize={setPaneSize}
+                  showMinimap={minimapOpen}
+                  issueSeverityByEntity={validation.severityByEntity}
+                  issueSeverityByRelationship={validation.severityByRelationship}
+                  revealRequest={revealRequest}
+                />
+              </EditorActionsProvider>
+            )}
+          </main>
+
+          {/* Collapsed by default: a permanently open problems list on a half-finished
+              diagram is a wall of warnings about work in progress. The badge on the
+              toggle is the part that is always visible (FR-8.4). */}
+          {isEmpty || !validationPanelOpen ? null : (
+            <ValidationPanel onClose={toggleValidationPanel} />
           )}
-        </main>
+        </div>
 
         {/* The panel appears only when there is something to edit. 288px of "select
             something" permanently narrows the canvas, which is the thing the user is

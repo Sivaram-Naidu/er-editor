@@ -13,6 +13,11 @@ export interface SaveFileOptions {
   extensions: Record<string, string>
 }
 
+export interface SaveBlobOptions extends Omit<SaveFileOptions, 'contents'> {
+  /** Already-encoded bytes. Used for PNG/SVG export (FR-6.5). */
+  blob: Blob
+}
+
 interface FileSystemPickerWindow {
   showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle>
   showOpenFilePicker?: (options: unknown) => Promise<FileSystemFileHandle[]>
@@ -27,8 +32,7 @@ export function hasFileSystemAccess(): boolean {
 }
 
 /** Fallback path: an object URL and a synthetic click. */
-function download(contents: string, filename: string, mimeType: string): void {
-  const blob = new Blob([contents], { type: mimeType })
+function download(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
 
@@ -45,8 +49,17 @@ function download(contents: string, filename: string, mimeType: string): void {
   }, 0)
 }
 
-/** @returns true if a file handle was used, false if it fell back to a download. */
-export async function saveTextFile(options: SaveFileOptions): Promise<boolean> {
+/**
+ * Write bytes to disk.
+ *
+ * @returns true if a file handle was used, false if it fell back to a download.
+ *
+ * Both public entry points funnel through here because the picker dance — feature detect,
+ * distinguish a cancellation from a failure, fall back — is the same whether the payload
+ * is a Mermaid file or a PNG, and a second copy of it would be a second place for the
+ * AbortError case to be got wrong.
+ */
+export async function saveBlobFile(options: SaveBlobOptions): Promise<boolean> {
   const showSaveFilePicker = picker().showSaveFilePicker
 
   if (showSaveFilePicker !== undefined) {
@@ -61,7 +74,7 @@ export async function saveTextFile(options: SaveFileOptions): Promise<boolean> {
         ],
       })
       const writable = await handle.createWritable()
-      await writable.write(options.contents)
+      await writable.write(options.blob)
       await writable.close()
       return true
     } catch (error) {
@@ -72,8 +85,14 @@ export async function saveTextFile(options: SaveFileOptions): Promise<boolean> {
     }
   }
 
-  download(options.contents, options.suggestedName, options.mimeType)
+  download(options.blob, options.suggestedName)
   return false
+}
+
+/** @returns true if a file handle was used, false if it fell back to a download. */
+export async function saveTextFile(options: SaveFileOptions): Promise<boolean> {
+  const { contents, ...rest } = options
+  return saveBlobFile({ ...rest, blob: new Blob([contents], { type: options.mimeType }) })
 }
 
 export interface OpenedFile {

@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment node
+ *
+ * Zustand stores are plain objects and the repository runs on fake-indexeddb, which is
+ * pure JS. Nothing here renders, so there is no DOM to need.
+ */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
@@ -19,6 +25,7 @@ import {
   createSelectionStore,
   createUiStore,
   createViewportStore,
+  viewportCenter,
 } from '../../../src/store'
 
 describe('diagramStore', () => {
@@ -89,6 +96,27 @@ describe('diagramStore', () => {
 
     expect(store.getState().diagram.name).toBe('Opened')
     expect(store.getState().history.canUndo).toBe(false)
+    expect(store.getState().isDirty).toBe(false)
+  })
+
+  it('markSaveFailed records why, and leaves the document dirty because it is', () => {
+    const store = createDiagramStore()
+    store.getState().execute(addEntity(createEntity({ name: 'CUSTOMER' })))
+
+    store.getState().markSaveFailed('QuotaExceededError')
+
+    expect(store.getState().saveError).toBe('QuotaExceededError')
+    // The edits really are unwritten. Clearing this would say the opposite.
+    expect(store.getState().isDirty).toBe(true)
+  })
+
+  it('a later successful save clears the error', () => {
+    const store = createDiagramStore()
+    store.getState().markSaveFailed('Storage is full')
+
+    store.getState().markSaved()
+
+    expect(store.getState().saveError).toBeUndefined()
     expect(store.getState().isDirty).toBe(false)
   })
 
@@ -243,6 +271,35 @@ describe('viewportStore', () => {
     expect(store.getState().lod).toBe(0)
     expect(store.getState().lodOverride).toBe(2)
   })
+
+  it('starts with no measured pane, so nothing can place from a guess', () => {
+    const store = createViewportStore()
+
+    expect(store.getState().paneWidth).toBe(0)
+    expect(store.getState().paneHeight).toBe(0)
+    expect(viewportCenter(store.getState())).toBeUndefined()
+  })
+
+  it('records the pane size the renderer reports', () => {
+    const store = createViewportStore()
+
+    store.getState().setPaneSize({ width: 1200, height: 800 })
+
+    expect(viewportCenter(store.getState())).toEqual({ x: 600, y: 400 })
+  })
+
+  it('writes nothing when the pane size did not change', () => {
+    // A window resize settles through several identical values, and every write here
+    // notifies every subscriber.
+    const store = createViewportStore()
+    store.getState().setPaneSize({ width: 1200, height: 800 })
+    const listener = vi.fn()
+    store.subscribe(listener)
+
+    store.getState().setPaneSize({ width: 1200, height: 800 })
+
+    expect(listener).not.toHaveBeenCalled()
+  })
 })
 
 describe('LOD hysteresis (ADR-0004)', () => {
@@ -322,6 +379,24 @@ describe('attachAutosave', () => {
     const saved = await repository.get(store.getState().diagram.id)
     expect(saved?.entities).toHaveLength(1)
     expect(store.getState().isDirty).toBe(false)
+
+    await handle.detach()
+  })
+
+  it('surfaces a failed write rather than leaving the indicator mid-save', async () => {
+    // The failure mode this guards: a save that never lands looks exactly like a save
+    // still in flight, so the user keeps typing into something that is not storing it.
+    const repository = new InMemoryDiagramRepository()
+    vi.spyOn(repository, 'put').mockRejectedValue(new Error('QuotaExceededError'))
+
+    const store = createDiagramStore()
+    const handle = attachAutosave({ store, repository, delayMs: 10 })
+
+    store.getState().execute(addEntity(createEntity({ name: 'CUSTOMER' })))
+    await vi.advanceTimersByTimeAsync(50)
+
+    expect(store.getState().saveError).toBe('QuotaExceededError')
+    expect(store.getState().isDirty).toBe(true)
 
     await handle.detach()
   })

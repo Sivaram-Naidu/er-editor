@@ -1,10 +1,11 @@
 // Open a .erd.json, .mmd or .sql file (FR-6.8).
 
-import { useEffect, useRef, useState } from 'react'
+import { useState } from 'react'
 
 import type { Diagram } from '../../domain'
 import type { SqlDialect } from '../../io'
 import { openTextFile } from '../../persistence'
+import { Dialog } from '../../ui'
 
 import { importFile, needsLayout } from './importFile'
 
@@ -18,21 +19,8 @@ export function ImportDialog(props: ImportDialogProps): React.ReactElement {
   const [dialect, setDialect] = useState<SqlDialect | 'auto'>('auto')
   const [error, setError] = useState<string | undefined>(undefined)
   const [warnings, setWarnings] = useState<string[]>([])
-  const dialogRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') props.onClose()
-    }
-    document.addEventListener('keydown', onKeyDown)
-    return () => {
-      document.removeEventListener('keydown', onKeyDown)
-    }
-  }, [props])
-
-  useEffect(() => {
-    dialogRef.current?.focus()
-  }, [])
+  // Escape, the focus trap, focus restore and the labelling all live in `ui/Dialog`.
 
   const choose = async (): Promise<void> => {
     setError(undefined)
@@ -55,75 +43,59 @@ export function ImportDialog(props: ImportDialogProps): React.ReactElement {
   }
 
   return (
-    <div className="erd-modal" role="presentation">
-      <div
-        className="erd-modal__panel erd-modal__panel--narrow"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Open a file"
-        tabIndex={-1}
-        ref={dialogRef}
-      >
-        <header className="erd-modal__head">
-          <h2>Open a file</h2>
-          <button type="button" className="erd-btn" onClick={props.onClose}>
-            Close
-          </button>
-        </header>
+    <Dialog title="Open a file" onClose={props.onClose} narrow>
+      <p className="erd-inspector__empty">
+        Reads <code>.erd.json</code>, Mermaid <code>.mmd</code>, and SQL <code>.sql</code> schemas.
+        The file opens as a new diagram, so your current work is kept.
+      </p>
 
-        <p className="erd-inspector__empty">
-          Reads <code>.erd.json</code>, Mermaid <code>.mmd</code>, and SQL <code>.sql</code>{' '}
-          schemas. The file opens as a new diagram, so your current work is kept.
+      <label className="erd-inspector__field">
+        <span className="erd-inspector__label">SQL dialect</span>
+        <select
+          className="erd-select erd-select--block"
+          value={dialect}
+          onChange={(event) => {
+            setDialect(event.target.value as SqlDialect | 'auto')
+          }}
+        >
+          <option value="auto">Detect automatically</option>
+          <option value="postgres">PostgreSQL</option>
+          <option value="mysql">MySQL</option>
+        </select>
+      </label>
+      <span className="erd-inspector__hint">
+        Only used for <code>.sql</code> files. Detection looks for backticks and{' '}
+        <code>ENGINE=</code> (MySQL) against <code>SERIAL</code> and casts (PostgreSQL).
+      </span>
+
+      {error === undefined ? null : (
+        <p className="erd-import__error" role="alert">
+          {error}
         </p>
+      )}
 
-        <label className="erd-inspector__field">
-          <span className="erd-inspector__label">SQL dialect</span>
-          <select
-            className="erd-select erd-select--block"
-            value={dialect}
-            onChange={(event) => {
-              setDialect(event.target.value as SqlDialect | 'auto')
-            }}
-          >
-            <option value="auto">Detect automatically</option>
-            <option value="postgres">PostgreSQL</option>
-            <option value="mysql">MySQL</option>
-          </select>
-        </label>
-        <span className="erd-inspector__hint">
-          Only used for <code>.sql</code> files. Detection looks for backticks and{' '}
-          <code>ENGINE=</code> (MySQL) against <code>SERIAL</code> and casts (PostgreSQL).
-        </span>
+      {warnings.length === 0 ? null : (
+        <div className="erd-import__warnings">
+          <h3>Notes</h3>
+          <ul>
+            {warnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        </div>
+      )}
 
-        {error === undefined ? null : (
-          <p className="erd-import__error" role="alert">
-            {error}
-          </p>
-        )}
-
-        {warnings.length === 0 ? null : (
-          <div className="erd-import__warnings">
-            <h3>Notes</h3>
-            <ul>
-              {warnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        <footer className="erd-modal__foot">
-          <button
-            type="button"
-            className="erd-btn erd-btn--primary"
-            onClick={() => {
-              void choose()
-            }}
-          >
-            Choose a file…
-          </button>
-        </footer>
-      </div>
-    </div>
+      <footer className="erd-modal__foot">
+        <button
+          type="button"
+          className="erd-btn erd-btn--primary"
+          onClick={() => {
+            void choose()
+          }}
+        >
+          Choose a file…
+        </button>
+      </footer>
+    </Dialog>
   )
 }

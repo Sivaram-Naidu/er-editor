@@ -24,6 +24,14 @@ export interface DiagramStoreState {
   history: CommandStackSnapshot
   /** True when there are edits not yet written to storage. Drives the save indicator. */
   isDirty: boolean
+  /**
+   * Why the last write failed, if it did.
+   *
+   * A failed autosave is the one error the user must not be left to infer. Without this
+   * the indicator sits on "Saving…" indefinitely — indistinguishable from a slow write —
+   * while the edits pile up somewhere that is not storage (NFR-3.5).
+   */
+  saveError: string | undefined
 
   execute: (command: Command) => void
   /** Several commands, one undo step (FR-7.1). */
@@ -34,6 +42,8 @@ export interface DiagramStoreState {
   load: (diagram: Diagram) => void
   /** Called by the autosaver once a write lands. */
   markSaved: () => void
+  /** Called by the autosaver when a write fails. Leaves `isDirty` set: it still is. */
+  markSaveFailed: (message: string) => void
 }
 
 export interface DiagramStoreOptions {
@@ -94,6 +104,7 @@ export function createDiagramStore(options: DiagramStoreOptions = {}): DiagramSt
       diagram: stack.state,
       history: stack.snapshot(),
       isDirty: false,
+      saveError: undefined,
 
       execute: (command) => {
         publish(stack.execute(command), true)
@@ -111,7 +122,12 @@ export function createDiagramStore(options: DiagramStoreOptions = {}): DiagramSt
         publish(stack.reset(diagram), false)
       },
       markSaved: () => {
-        set({ isDirty: false })
+        set({ isDirty: false, saveError: undefined })
+      },
+      markSaveFailed: (message) => {
+        // `isDirty` deliberately stays true. The document really is unsaved, and the
+        // next successful write is what clears both flags together.
+        set({ saveError: message })
       },
     }
   })

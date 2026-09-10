@@ -7,8 +7,6 @@
 // Every control writes through a command, so everything here is undoable and coalesced
 // exactly like a canvas edit. There is no second write path.
 
-import { useMemo } from 'react'
-
 import {
   addAttribute,
   addRelationship,
@@ -18,6 +16,7 @@ import {
   deleteEntity,
   deleteRelationship,
   incidentRelationships,
+  indexOf,
   moveAttribute,
   renameRelationship,
   setEntityKind,
@@ -60,18 +59,19 @@ export function InspectorPanel(): React.ReactElement {
   const selectRelationships = useSelectionStore((state) => state.selectRelationships)
   const clearSelection = useSelectionStore((state) => state.clearSelection)
 
-  const entityById = useMemo(
-    () => new Map(diagram.entities.map((entity) => [entity.id as string, entity])),
-    [diagram.entities],
-  )
+  // The domain already keeps this map, cached against the diagram object itself, so
+  // building a second one here would be both duplicated work and a chance to disagree
+  // with it. Keyed by `EntityId` rather than widened to `string`: the branded id is what
+  // stops an attribute or relationship id being passed to an entity lookup.
+  const { entityById, relationshipById } = indexOf(diagram)
 
-  const entity =
-    selectedEntityIds.size === 1 ? entityById.get([...selectedEntityIds][0] ?? '') : undefined
+  const selectedEntityId = selectedEntityIds.size === 1 ? [...selectedEntityIds][0] : undefined
+  const entity = selectedEntityId === undefined ? undefined : entityById.get(selectedEntityId)
 
+  const selectedRelationshipId =
+    selectedRelationshipIds.size === 1 ? [...selectedRelationshipIds][0] : undefined
   const relationship =
-    selectedRelationshipIds.size === 1
-      ? diagram.relationships.find((candidate) => candidate.id === [...selectedRelationshipIds][0])
-      : undefined
+    selectedRelationshipId === undefined ? undefined : relationshipById.get(selectedRelationshipId)
 
   const attribute =
     entity === undefined

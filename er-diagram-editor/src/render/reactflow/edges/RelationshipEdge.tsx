@@ -3,7 +3,7 @@
 import { BaseEdge, EdgeLabelRenderer, type EdgeProps } from '@xyflow/react'
 import { memo } from 'react'
 
-import type { Cardinality, Participation, Relationship } from '../../../domain'
+import type { Cardinality, Participation, Relationship, Severity } from '../../../domain'
 import { markerFor } from '../../notation/compact'
 
 import { tracedMarkerId } from './endpoints'
@@ -16,11 +16,13 @@ export interface RelationshipEdgeData extends Record<string, unknown> {
   targetName: string
   isTraced: boolean
   isDimmed: boolean
+  /** Worst validation severity on this relationship (FR-8.4). */
+  issueSeverity: Severity | undefined
 }
 
 function RelationshipEdgeComponent(props: EdgeProps): React.ReactElement {
   const data = props.data as unknown as RelationshipEdgeData
-  const { relationship, isTraced, isDimmed } = data
+  const { relationship, isTraced, isDimmed, issueSeverity } = data
   const [from, to] = relationship.participants
 
   const markerUrl = (end: { cardinality: Cardinality; participation: Participation }): string => {
@@ -45,6 +47,12 @@ function RelationshipEdgeComponent(props: EdgeProps): React.ReactElement {
       /* Non-identifying relationships are dashed, matching Mermaid's `..` and the
          standard IE convention (FR-1.9). */
       data-identifying={relationship.isIdentifying || undefined}
+      /* A connector cannot carry a badge without cluttering the very thing it is drawn
+         to keep legible, so the cue here is the stroke itself. The panel holds the
+         wording; an unnamed relationship is by definition one with no label to annotate.
+         Never the only cue for a given issue — every one of these also appears in the
+         panel with a sentence (NFR-4.4). */
+      data-issue={issueSeverity}
     >
       {/* Markers are spread conditionally rather than passed as `undefined`: React Flow
           types them as optional-not-undefined, and `exactOptionalPropertyTypes` holds us

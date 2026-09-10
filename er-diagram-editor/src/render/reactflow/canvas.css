@@ -71,6 +71,36 @@
   flex-shrink: 0;
 }
 
+/* ── Validation markers (FR-8.4) ──────────────────────────────────────────── */
+
+/* The glyph on the box header. Small, and set in the severity colour, but the glyph and
+ * the visually-hidden word carry the meaning — colour alone never does (NFR-4.4).
+ *
+ * Deliberately NOT a border or fill change on the node. The traced-path highlight
+ * already owns the border and the elevation (FR-4.1), and a second treatment competing
+ * for the same channel would make a hovered-and-invalid table unreadable. */
+.erd-node__issue {
+  flex-shrink: 0;
+  width: 1.15em;
+  height: 1.15em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: var(--erd-text-xs);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--erd-paper);
+}
+
+.erd-node__issue[data-severity='error'] {
+  background: var(--erd-danger);
+}
+
+.erd-node__issue[data-severity='warning'] {
+  background: var(--erd-warning);
+}
+
 .erd-node__attrs {
   display: flex;
   flex-direction: column;
@@ -232,6 +262,23 @@
 /* Non-identifying relationships are dashed, matching Mermaid's `..` (FR-1.9). */
 .erd-edge:not([data-identifying]) .react-flow__edge-path {
   stroke-dasharray: 5 3;
+}
+
+/* A connector with an issue takes the severity colour (FR-8.4).
+ *
+ * Colour is the only channel available here — a badge on a line clutters the thing the
+ * line exists to keep readable, and the stroke weight and dash pattern are already spoken
+ * for by tracing and by identifying-vs-not. It is not the only cue for the issue itself,
+ * though: every one of these also appears in the panel as a sentence (NFR-4.4).
+ *
+ * The traced state wins, because it is a direct response to where the pointer is and has
+ * to stay legible; the marker is ambient. Hence the :not() rather than source order. */
+.erd-edge[data-issue='error']:not([data-traced]) .react-flow__edge-path {
+  stroke: var(--erd-danger);
+}
+
+.erd-edge[data-issue='warning']:not([data-traced]) .react-flow__edge-path {
+  stroke: var(--erd-warning);
 }
 
 /* A wide invisible stroke over the visible one. Hovering a 1.25px line is unreasonably

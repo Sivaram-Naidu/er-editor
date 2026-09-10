@@ -1,13 +1,13 @@
 // Name, cardinality, participation and the identifying flag (FR-1.5, FR-1.9, FR-1.12).
 
-import type { Cardinality, Entity, Participation, Relationship } from '../../domain'
+import type { Cardinality, Entity, EntityId, Participation, Relationship } from '../../domain'
 import { describeEnd } from '../../render'
 
 import { Field, Toggle } from './controls'
 
 export interface RelationshipInspectorProps {
   relationship: Relationship
-  entityById: ReadonlyMap<string, Entity>
+  entityById: ReadonlyMap<EntityId, Entity>
   onRename: (name: string) => void
   onPatchEnd: (
     end: number,
@@ -27,8 +27,10 @@ const CARDINALITY: { value: string; label: string }[] = [
 export function RelationshipInspector(props: RelationshipInspectorProps): React.ReactElement {
   const { relationship } = props
   const [from, to] = relationship.participants
-  const fromName = props.entityById.get(from?.entityId ?? '')?.name ?? 'unnamed'
-  const toName = props.entityById.get(to?.entityId ?? '')?.name ?? 'unnamed'
+  const nameOf = (end: typeof from): string =>
+    (end === undefined ? undefined : props.entityById.get(end.entityId)?.name) || 'unnamed'
+  const fromName = nameOf(from)
+  const toName = nameOf(to)
 
   // Recursive relationships have the same entity at both ends, so "CUSTOMER" twice tells
   // the user nothing. Roles are what distinguish the ends there (FR-1.12), so they are
