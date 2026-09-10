@@ -68,13 +68,42 @@ describe('measurement', () => {
     expect(measureEntity(entity, 1).height).toBeLessThan(measureEntity(entity, 2).height)
   })
 
-  it('widens for longer names, within bounds', () => {
+  it('clamps width to exactly the bounds canvas.css draws', () => {
+    // These are not approximations to be loosened when they fail: `.erd-node` sets
+    // `min-width: 160px; max-width: 300px`, with `min-width: 120px` at L0. Both clamps are
+    // exact, so assert the values rather than an inequality — the previous version of this
+    // test asserted `>= 160` at L0 and passed only because `measure.ts` had a single
+    // 168px floor that did not match the stylesheet at any level.
     const short = createEntity({ name: 'A' })
-    const long = createEntity({ name: 'A_VERY_LONG_TABLE_NAME_INDEED_YES' })
+    const long = createEntity({ name: 'a_very_long_table_name_that_runs_well_past_the_cap' })
 
     expect(measureEntity(long, 0).width).toBeGreaterThan(measureEntity(short, 0).width)
-    expect(measureEntity(long, 0).width).toBeLessThanOrEqual(300)
-    expect(measureEntity(short, 0).width).toBeGreaterThanOrEqual(160)
+    expect(measureEntity(short, 0).width).toBe(120)
+    expect(measureEntity(short, 2).width).toBe(160)
+    expect(measureEntity(long, 2).width).toBe(300)
+  })
+
+  it('bills a row above the measured rate, so wide tables never under-measure', () => {
+    /*
+     * The per-row rate creeps up with the row count, because every row after the first adds
+     * a 1px rule on top of a 26.3px line box: `.erd-node__attrs` measured 136px at 5 rows
+     * and 1642px at 60, i.e. 27.2 to 27.37px per row.
+     *
+     * A flat 27 looks right on a five-row table and under-measures a 60-column one by 22px.
+     * Under-measuring is the direction that makes ELK stack boxes, and it would only ever
+     * have shown up on the wide tables real schemas actually have — which is why this
+     * asserts the rate rather than comparing two heights loosely.
+     */
+    const rows = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        createAttribute({ name: `field_${String(index)}` }),
+      )
+    const wide = createEntity({ name: 'WIDE', attributes: rows(60) })
+    const bare = createEntity({ name: 'WIDE' })
+
+    const perRow = (measureEntity(wide, 2).height - measureEntity(bare, 2).height) / 60
+
+    expect(perRow).toBeGreaterThanOrEqual(27.37)
   })
 
   it('measures every entity in the diagram', () => {

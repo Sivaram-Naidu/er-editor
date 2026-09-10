@@ -852,11 +852,16 @@ Given a schema with the shape §13.1 always said mattered — 60-column tables, 
 keys into one hub, names like `cust_reconciliation_amount_in_local_currency` — three
 defects surfaced. All three are recorded in `NEXT.md` with reproductions:
 
-1. **`measure.ts` under-measures any box whose column names wrap**, by up to 586px (86%),
-   because it bills every row at a flat 26px while `canvas.css` sets
-   `overflow-wrap: anywhere` under a 300px cap. ELK is told the boxes are shorter than they
-   are and stacks them: 26 overlapping pairs on 41 tables. `tests/e2e/measurement.spec.ts`
-   asserts the estimate against the rendered box and is marked `test.fail()` until fixed.
+1. ~~**`measure.ts` under-measures any box whose column names wrap**, by up to 586px
+   (86%), stacking 26 overlapping pairs on 41 tables.~~ **Fixed 10 Sep 2026.** Rows are
+   pinned to one line in `canvas.css` (`text-overflow: ellipsis`, full name in the `title`),
+   which makes the flat per-row height in `measure.ts` correct by construction rather than
+   by calibration — while a name could wrap, no fixed per-character width could predict the
+   height, because where a name breaks depends on its glyphs (6.2 to 10.2 px per character
+   measured) rather than its length. Every constant was re-measured off the DOM and biased
+   upward, so the estimate now over-estimates by at most 4px and never under-estimates.
+   0 overlapping pairs at every detail level. `tests/e2e/measurement.spec.ts` asserts the
+   inequality against the rendered box and passes.
 2. **A hub-and-spoke schema renders as an unusable vertical ribbon.** 40 tables all
    referencing one hub become a single ELK layer, roughly 1,000px wide and 40,000px tall.
    NFR-2.2's "remain usable up to 300 entities" is not a count question alone; it is a

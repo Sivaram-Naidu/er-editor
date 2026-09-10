@@ -188,6 +188,33 @@ culling off.
   `mouse.move` / `down` / `up` with no pause between the move and the press — see
   `coldClick` in `tests/e2e/helpers.ts`. Related: `test.fail()` outside a test body marks
   every test in the file.
+- **A test that feeds its own estimate back in cannot validate the estimate.**
+  `tests/unit/layout` had a spec named "produces no overlapping boxes" whose comment
+  claimed "if the measurements in measure.ts drift away from what canvas.css draws, this is
+  what catches it". It passed `measureAll` output to ELK and then checked for overlap using
+  _that same output_, so all it ever asserted was that ELK honoured the sizes it was given.
+  No unit test can do better here — jsdom performs no layout, so there is no rendered height
+  to disagree with. `tests/e2e/measurement.spec.ts` compares the estimate against
+  `offsetHeight` in Chrome, which is the only place the two can disagree.
+- **`measure.ts`'s constants have to be MEASURED, not read off canvas.css by eye.** The
+  previous set was wrong about the header (36 vs 38), the add-field row (24 vs 27), the "N
+  more" row (folded into the add row, actually 30), the border (uncounted, and 2px or 4px
+  depending on selection and validation state), and both width clamps (320/168 against a
+  stylesheet that says 300/160/120). Two related traps:
+  - **A flat per-row height under-measures at scale.** The true rate is ~27.37px, not 27,
+    because every row after the first adds a 1px rule to a 26.3px line box. A flat 27 looks
+    correct on a five-row table and under-measures a 60-column one by 22px — so the error
+    only appears on the wide tables real schemas have. `tests/fixtures/wide-names.sql` keeps
+    a 60-column table for exactly this, and there is a unit guard on the rate.
+  - **Bias every constant so the estimate comes out LARGE.** Too big spaces boxes slightly
+    further apart than needed; too small makes ELK stack them.
+- **`text-overflow: ellipsis` does nothing on a flex item without `min-width: 0`.** A flex
+  item's default `min-width: auto` refuses to shrink below its content, so the name overflows
+  the box and the ellipsis never appears. This is why rows can be pinned to one line at all,
+  and pinning them is what makes the flat row height in `measure.ts` true by construction
+  rather than by calibration — while a name could wrap, no fixed per-character width could
+  predict the height, because where a name breaks depends on its glyphs (measured 6.2 to
+  10.2 px per character on real column names) rather than on its length.
 - **Three separate ways to ship a broken image export.** All three produced a file, none
   threw, and all three passed every check a unit test can make. See `docs/SRS.md` §13.1.
   - `useStore(s => s.nodesInitialized)` is a **stale flag**. React Flow recomputes it only

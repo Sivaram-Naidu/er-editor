@@ -58,11 +58,16 @@
   border-bottom: none;
 }
 
+/* One line, always — see the note on `.erd-attr__name`. The header is measured as a
+   fixed `headerHeight` in measure.ts for the same reason a row is. */
 .erd-node__name {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--erd-ink);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .erd-node__kind {
@@ -127,9 +132,36 @@
   border-top: 1px solid color-mix(in srgb, var(--erd-rule) 45%, transparent);
 }
 
+/*
+ * ONE LINE PER ROW, AND IT IS LOAD-BEARING RATHER THAN COSMETIC
+ *
+ * This was `overflow-wrap: anywhere`, which let a long column name wrap to two or three
+ * lines. ELK positions boxes from `measure.ts`'s estimate, and that estimate bills every
+ * row at a flat `rowHeight` because measuring the real DOM would cost a synchronous
+ * reflow over every node (see the header of measure.ts). A wrapped row is 47-48px against
+ * the 26px billed, so ELK was told boxes were shorter than they are and stacked them: 26
+ * overlapping pairs on a 41-table schema, the worst box under-measured by 586px.
+ *
+ * The reason this is fixed here rather than by teaching the estimate to wrap: where a name
+ * breaks depends on its glyphs, not its length. Six real column names measured between 6.2
+ * and 10.2 px per character, and `measure.ts` has one `charWidth` to work with. A fixed
+ * per-character width would under-predict some rows, and under-predicting is the direction
+ * that overlaps. Pinning the row to one line makes the flat `rowHeight` correct by
+ * construction on every platform and font instead of by calibration.
+ *
+ * `min-width: 0` is the part that is easy to miss: without it the name is a flex item that
+ * refuses to shrink below its content, so it overflows the box and `text-overflow` never
+ * gets a chance to fire.
+ *
+ * The cost is that a long name is only fully readable on hover, which is why the `title`
+ * carries it — see `InlineName` and `AttributeRow`.
+ */
 .erd-attr__name {
+  min-width: 0;
+  overflow: hidden;
   color: var(--erd-ink);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Primary key: underlined, the standard ER cue. Survives greyscale (NFR-4.4). */

@@ -64,6 +64,19 @@ Both dev and `vite preview` of the production build.
 | Entry bundle still under budget | 718,191 B raw / **222,462 B gzip** (was 717,768 / 222,275). Budget 500 KB. Zero GWT fingerprints (`gwtOnLoad`, `$wnd`) in the entry chunk.                                                                            |
 | Production build, not just dev  | Every row above re-run against `vite preview`. Layout took ~1.06 s end to end, including the 1.6 MB worker fetch.                                                                                                     |
 
+### Verified in a real browser (Chrome, 10 Sep 2026 — box measurement session)
+
+| Thing                              | Evidence                                                                                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overlapping boxes, 41-table schema | **0 pairs at L0, L1 and L2**, down from 26. Every rendered box now at least as tall as `measure.ts` predicted.                                |
+| Rows are one line, always          | Every `.erd-attr` measures 26–27 px at L2 where they ran 26–48 px before. The 6-column table went from 333 px to 232 px.                      |
+| The estimate never under-shoots    | `tests/e2e/measurement.spec.ts` compares `measureAll` against `offsetHeight` for every box and passes; over-estimates by at most 4 px.        |
+| Per-row rate, measured             | `.erd-node__attrs`: 136 px at 5 rows, 163 at 6, 437 at 16, 656 at 24, **1642 at 60** — 27.2 to 27.37 px per row, creeping up. Billed at 27.4. |
+| Boxes are much shorter             | L2 heights on the 41-table schema fell from 767–2963 px to **504–1711 px**.                                                                   |
+| Truncation reads well              | Screenshot looked at at 100% zoom: names ellipsize, types stay aligned right, rows uniform. Full name in the `title`.                         |
+| Layout still fast                  | 349 / 264 / 427 ms at L0 / L1 / L2 on 41 tables.                                                                                              |
+| The ribbon is NOT fixed            | Still one vertical column, ~42% shorter. Item 2 is unchanged in kind — see the correction in its entry.                                       |
+
 ### Verified in a real browser (Chrome, 10 Sep 2026 — real-schema session)
 
 | Thing                                                | Evidence                                                                                                                                                                            |
@@ -78,34 +91,34 @@ Both dev and `vite preview` of the production build.
 
 ### Known broken
 
-1. **`measure.ts` under-measures every box whose column names wrap, and boxes overlap as
-   a result.** The estimate bills each attribute row at a flat `rowHeight: 26`, but
-   `canvas.css` sets `overflow-wrap: anywhere` on `.erd-attr__name` under
-   `.erd-node { max-width: 300px }`, so a long name wraps to two or three lines and the row
-   grows. ELK is told the box is shorter than it is and stacks boxes on top of each other.
-   Measured: worst box 586 px (86%) under, 26 overlapping pairs on 41 tables. Reproduction
-   and the fix decision are in Tier 1 item 1.
-2. **A hub-and-spoke schema is unusable at L2.** 40 tables referencing one hub all land in
+1. **A hub-and-spoke schema is unusable at L2.** 40 tables referencing one hub all land in
    a single ELK layer, giving a diagram ~1,000 px wide and ~40,000 px tall — a vertical
    ribbon, unreadable at every zoom. This is the ordinary shape of a warehouse or any
    schema with a `users` table, and NFR-2.2's "usable up to 300 entities" says nothing
    about it because it counts entities rather than looking at shape. Tier 1 item 2.
-3. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
+2. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
    473 ms, even though ELK now genuinely runs in a worker. The block is on our side of the
    boundary: applying 120 positions is one Immer pass plus patch derivation plus a store
    publish plus revalidation, and then React commits 120 nodes and 150 edges at once.
    Tier 1 item 3.
-4. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
-5. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+4. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-6. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
-   overlay minimap, but combined with 5 a good deal of the canvas is unreachable. See
+5. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 4 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
 Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
+
+- ~~`measure.ts` under-measures every box whose column names wrap.~~ Rows are now pinned to
+  one line in CSS (`text-overflow: ellipsis`, with the full name in the `title`), so the
+  flat per-row height is correct by construction rather than by calibration. 26 overlapping
+  pairs → 0. The constants were re-measured off the DOM rather than read off the stylesheet
+  by eye, and the per-row rate turned out to be 27.37 px rather than 27 — a flat 27
+  under-measures a 60-column table by 22 px, which is why the fixture now contains one.
 
 - ~~Auto-layout does nothing, and throws.~~ **Two independent defects, not one.**
   `elk.bundled.js` cannot run inside a Web Worker — it is the main-thread build whose job is
@@ -124,12 +137,11 @@ Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without 
 
 ### Numbers, so drift stays visible
 
-- 697 unit tests in 29 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+- 698 unit tests in 29 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
   lines against an 80% gate.
-- **16 e2e specs in 3 files, ~40s.** 15 pass; `tests/e2e/measurement.spec.ts` is marked
-  `test.fail()` because the defect it asserts is real and unfixed — Playwright turns the
-  suite red if it starts passing. `pnpm test:e2e` is part of `pnpm verify`, and the config
-  uses `channel: 'chrome'` so no browser download is needed.
+- **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
+test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
+  download is needed.
 - Bundle 718 kB raw, 222 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
   inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
   only, never at boot.
@@ -232,98 +244,7 @@ in Chrome, a real dump imports with no overlaps at all, and the ~840 ms the perf
 reports in-process was an honest number. The tool is not slow. It is wrong about the size of
 its own boxes, and indifferent to the shape of the graph.
 
-### 1. Make `measure.ts` tell ELK the truth about wrapped rows
-
-**Already established — do not redo this:**
-
-- `measure.ts` bills every attribute row at `rowHeight: 26`. `canvas.css` sets
-  `overflow-wrap: anywhere` on `.erd-attr__name` and `.erd-attr__type { white-space: nowrap }`
-  inside `.erd-node { max-width: 300px }`. So once a name plus its type exceeds the cap the
-  name wraps, the row becomes ~52–78 px, and the flat 26 px is wrong by multiples.
-- Measured on 41 tables with realistic names, at L2: **every** rendered box taller than
-  predicted, the worst 1270 px against a predicted 684 px — **586 px, 86% under**. **26
-  overlapping pairs**, the worst overlapping by 300x530 px, i.e. entirely covering.
-- The header is 38 px, not the 36 px `METRICS.headerHeight` claims. Small, but the same
-  kind of drift.
-- Two other constants disagree with the stylesheet, both harmlessly: `measure.ts` says
-  `maxWidth: 320` where CSS says 300, and `minWidth: 168` where CSS says 160 (120 at L0).
-  Those err generous, which is the safe direction the file's own comment describes.
-- **The no-overlap unit test cannot catch any of this, and its comment says it can.**
-  `tests/unit/layout/layout.test.ts` feeds `measureAll` output to ELK and then checks for
-  overlap using _that same output_, so it asserts only that ELK honoured the sizes it was
-  given. Nor can any unit test: jsdom performs no layout, so there is no rendered height to
-  disagree with. `tests/e2e/measurement.spec.ts` is the replacement and it fails today, on
-  purpose: `dim_cust_master_hist_2019: measure.ts says 216px tall, the browser draws 333px`.
-
-**Measured in Chrome, 10 Sep 2026 — this replaces the guesswork in the paragraph above.**
-Every number here came off the DOM with the `wide-names.sql` fixture at L2; the arithmetic
-is unambiguous because `line-height` is 20.3px and row padding is 3px top and bottom:
-
-| Part                     | `measure.ts` says  | The browser draws                   |
-| ------------------------ | ------------------ | ----------------------------------- |
-| Header                   | `headerHeight: 36` | **38 px**                           |
-| "+ Add field" row        | `addRowHeight: 24` | **27 px**                           |
-| Attribute row, one line  | `rowHeight: 26`    | 26–27 px — correct                  |
-| Attribute row, two lines | `rowHeight: 26`    | **47–48 px** (20.3 x 2 + 6 padding) |
-| Box border               | not accounted for  | 2 px, `box-sizing: border-box`      |
-| Max width                | `maxWidth: 320`    | `.erd-node` caps at **300 px**      |
-| Min width                | `minWidth: 168`    | **160 px** (120 px at L0)           |
-
-Worked example — `dim_cust_master_hist_2019`, six columns: 38 header + (47+27+48+48+48+48
-rows) + 27 add-row + 2 border = **333 px**. `measure.ts` predicts 36 + 6x26 + 24 = **216 px**.
-That is the whole 117px gap, accounted for line by line.
-
-**The finding that decides this, and it is not what the paragraph above assumed.** The
-per-row variation is text wrapping inside `.erd-attr__name`, and the width at which a name
-wraps depends on its actual glyphs, not on its length. Measured on six real column names:
-
-| Name length | Rendered width | Effective px/char |
-| ----------- | -------------- | ----------------- |
-| 36 chars    | 324 px         | 9.0               |
-| 38 chars    | 386 px         | 10.2              |
-| 44 chars    | 279 px         | 6.3               |
-| 47 chars    | 291 px         | 6.2               |
-
-`measure.ts` uses a single `charWidth: 7.8`. Against a 1.6x spread, a fixed per-character
-width cannot predict where a line breaks — it will under-predict some rows (overlap, the
-unsafe direction) and over-predict others. **So "teach the estimate to wrap" as written
-above is unsound, not merely inferior.** It cannot be made reliable by better calibration,
-and `measure.ts` exists precisely to avoid measuring the DOM (its header explains why: a
-synchronous reflow across every node blows NFR-1.3 on its own, and culled nodes are not
-mounted to measure).
-
-**So the real choice is between these two:**
-
-- **A — pin every row to one line in CSS.** `text-overflow: ellipsis` plus
-  `white-space: nowrap` on `.erd-attr__name` (and `min-width: 0` so the flex item can
-  actually shrink), full name in a `title`. Rows become deterministically 26 px on every
-  platform and font, so the existing flat `rowHeight` is right **by construction rather
-  than by calibration** — and the e2e spec can assert the estimate matches the DOM exactly.
-  Boxes also get much shorter, which is the one thing that helps item 2's ribbon. Cost: a
-  long column name is only fully readable on hover.
-- **B — deliberately over-estimate.** Assume two lines for any row whose name plus type
-  could plausibly exceed the width, using the widest observed px/char (~10.2) rather than
-  the average. No visual change at all and the overlap goes away, because the error is
-  forced into the safe direction. Costs: diagrams with long names get noticeably airier,
-  the estimate stays approximate, and the contract weakens from "matches the DOM" to "never
-  under-estimates" — `tests/e2e/measurement.spec.ts` would need relaxing to assert that
-  inequality instead of equality.
-
-**Recommend A.** B is honest arithmetic around a problem A removes: while rows can wrap, no
-fixed-width estimate is trustworthy across platforms, and every future change to the type
-scale re-opens the same gap. A is also the only one of the two that makes item 2 easier.
-The objection to A is real — legibility at scale is this tool's claim, and truncating names
-cuts against it — which is why it is still a decision rather than a change.
-
-Either way, fold in the decision-independent corrections while you are there: header 36→38,
-add-row 24→27, the 2px border, and the 320/300 and 168/160 width drift. All of those make
-the estimate larger, i.e. safer. Alone they close only ~7px of 117px, which is why they are
-not worth a commit on their own.
-
-`tests/e2e/measurement.spec.ts` is the acceptance test (relax it to an inequality if B).
-Reproduction: `tests/fixtures/wide-names.sql`.
-
-### 2. Lay out a hub-and-spoke schema so it is readable
+### 1. Lay out a hub-and-spoke schema so it is readable
 
 40 tables all referencing one hub produce a single ELK layer: a diagram roughly 1,000 px
 wide and 40,000 px tall, unreadable at any zoom. Screenshot evidence is in the browser table
@@ -340,9 +261,13 @@ Undiagnosed beyond the observation. Things worth trying, cheapest first:
 - Whether `force` or `mrtree` (both already in `options.ts` and reachable via
   `LayoutAlgorithm`) do better on this shape, and whether the algorithm should be chosen
   from the graph rather than by the user.
-- Item 1 interacts: shorter boxes make any layer shorter, so do these in that order.
+- **Correction, 10 Sep 2026:** the previous version of this item said the box-measurement
+  fix would make it easier. It barely did. Pinning rows to one line cut L2 box heights by
+  about 42% (767–2963 px down to 504–1711 px) and the ribbon is still a ribbon — 41 tables
+  in one column, unreadable at every zoom. The problem is the single ELK layer, not the box
+  height, so treat this as untouched by that work.
 
-### 3. Stop the main thread blocking for 473 ms when a layout lands
+### 2. Stop the main thread blocking for 473 ms when a layout lands
 
 NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". Measured in
 Chrome on the 120-entity reference schema: blocks of **323 ms at L0, 142 ms at L1 and 473 ms
@@ -358,7 +283,7 @@ between them. The obvious levers are chunking the commit, `startTransition` arou
 apply, or keeping revalidation off the layout path. Note that NFR-1.3's 100 ms interaction
 budget has never been measured in a browser either, and probably fails on the same path.
 
-### 4. Search and command palette (FR-2.6, FR-9.2)
+### 3. Search and command palette (FR-2.6, FR-9.2)
 
 Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
 reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
@@ -368,7 +293,7 @@ match over a hundred table names does not need a fuzzy-search library.
 
 ## Tier 2 — make it actually useful
 
-### 5. Re-import onto an existing diagram, preserving layout
+### 4. Re-import onto an existing diagram, preserving layout
 
 The item that changes what the tool is. Import currently replaces the document wholesale.
 What is needed: import a `.sql` or `.mmd` over the _current_ diagram, match entities by
@@ -384,10 +309,10 @@ applied.
 
 In order:
 
-6. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+5. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-7. **Stop rebuilding every node object on hover.** The performance half of the
+6. **Stop rebuilding every node object on hover.** The performance half of the
    click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
    split-store note already promises ("hover is separated _so that_ it does not re-render
    every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
@@ -397,7 +322,7 @@ In order:
    `EntityNode` subscribe to trace state by its own id instead of receiving it in
    `node.data`. Measure first: at four entities it is free, and the cost has never been
    measured at scale.
-8. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+7. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.

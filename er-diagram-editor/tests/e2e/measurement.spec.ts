@@ -26,21 +26,20 @@ import { importFile, nodeTransforms } from './helpers'
 
 const WIDE_NAMES = readFileSync(join('tests', 'fixtures', 'wide-names.sql'), 'utf8')
 
-test('the size measure.ts reports is the size the browser draws', async ({ page }) => {
-  /*
-   * EXPECTED TO FAIL — the defect is real and is not fixed. See NEXT.md.
-   *
-   * Long column names wrap, because `.erd-attr__name` sets `overflow-wrap: anywhere` and
-   * `.erd-node` caps at `max-width: 300px`. A wrapped row is two or three lines tall;
-   * `measure.ts` bills every row at a flat `rowHeight: 26`. So ELK is told these boxes are
-   * far shorter than they are and stacks them on top of each other — 26 overlapping pairs
-   * on a 41-table schema of this shape, the worst box under-measured by 586px.
-   *
-   * Left failing on purpose rather than skipped: Playwright turns the suite red the moment
-   * it starts passing, which is the reminder to drop this marker.
-   */
-  test.fail()
+/**
+ * The contract is an INEQUALITY, and deliberately so.
+ *
+ * `measure.ts` cannot be exact and should not pretend to be: `.erd-node`'s border is 2px
+ * normally and 4px when the entity is selected or carries a validation marker, and
+ * `measureEntity` is told neither. Sub-pixel line heights round differently per row too.
+ *
+ * What matters is the DIRECTION of the error. Over-estimating spaces boxes slightly
+ * further apart than needed; under-estimating makes ELK lay them on top of each other.
+ * So: never smaller than the real box, and not wastefully larger.
+ */
+const MAX_OVER_ESTIMATE_PX = 8
 
+test('measure.ts never tells ELK a box is smaller than the browser draws', async ({ page }) => {
   // The same two pure functions the layout path uses, on the same input.
   const { diagram } = importSql(WIDE_NAMES, { dialect: 'postgres', diagramName: 'wide-names' })
   const predicted = measureAll(diagram, 2)
@@ -79,14 +78,24 @@ test('the size measure.ts reports is the size the browser draws', async ({ page 
     const estimate = byName.get(box.name)
     expect(estimate, `no estimate for ${box.name}`).toBeDefined()
 
-    // A pixel or two of rounding is fine. The failure this catches is hundreds.
+    // The one that matters: an under-estimate is what overlaps boxes.
     expect(
-      Math.abs(estimate!.height - box.height),
-      `${box.name}: measure.ts says ${String(estimate!.height)}px tall, the browser draws ${String(box.height)}px`,
-    ).toBeLessThanOrEqual(2)
+      estimate!.height,
+      `${box.name}: measure.ts says ${String(estimate!.height)}px tall but the browser draws ${String(box.height)}px — ELK will stack this box on its neighbour`,
+    ).toBeGreaterThanOrEqual(box.height)
     expect(
-      Math.abs(estimate!.width - box.width),
-      `${box.name}: measure.ts says ${String(estimate!.width)}px wide, the browser draws ${String(box.width)}px`,
-    ).toBeLessThanOrEqual(2)
+      estimate!.width,
+      `${box.name}: measure.ts says ${String(estimate!.width)}px wide but the browser draws ${String(box.width)}px`,
+    ).toBeGreaterThanOrEqual(box.width)
+
+    // And not so far over that the diagram fills with whitespace.
+    expect(
+      estimate!.height - box.height,
+      `${box.name}: measure.ts over-estimates height by ${String(estimate!.height - box.height)}px`,
+    ).toBeLessThanOrEqual(MAX_OVER_ESTIMATE_PX)
+    expect(
+      estimate!.width - box.width,
+      `${box.name}: measure.ts over-estimates width by ${String(estimate!.width - box.width)}px`,
+    ).toBeLessThanOrEqual(MAX_OVER_ESTIMATE_PX)
   }
 })

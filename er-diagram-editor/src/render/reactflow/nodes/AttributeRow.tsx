@@ -93,6 +93,9 @@ export function AttributeRow(props: AttributeRowProps): React.ReactElement {
       ) : (
         <span
           className="erd-attr__name"
+          /* Read-only surfaces clip the same way the editable ones do, so they need the
+             same tooltip — this is the only place the full name is available. */
+          title={attribute.name === '' ? undefined : attribute.name}
           data-key={attribute.isPrimaryKey || undefined}
           data-derived={attribute.isDerived || undefined}
         >
