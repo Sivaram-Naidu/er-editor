@@ -2,9 +2,16 @@
 
 ## ER Diagram Editor — a browser-based tool for large relational schemas
 
-**Version:** 1.0 (SRS for product V1 / MVP)
-**Date:** 8 September 2026
-**Status:** Draft for review
+**Version:** 1.1 — revised against the implementation
+**Date:** 9 September 2026
+**Status:** V1 substantially built. This revision records what was delivered, where
+reality diverged from v1.0, and what remains.
+
+> **How to read this document.** Every functional requirement carries a **Status**:
+> **Done** (built and tested), **Partial** (usable but incomplete — the gap is stated),
+> **Open** (not started). Non-functional requirements carry measured values where they
+> have been measured. Where the implementation contradicts v1.0, the change and its
+> reason are in §12.
 
 ---
 
@@ -146,119 +153,119 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 
 ### 4.1 Diagram construction
 
-| ID      | Priority | Requirement                                                                                                                                                                                                   |
-| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-1.1  | P0       | The user can create an entity via toolbar button, canvas context menu, or keyboard shortcut (`E`). The new entity is placed at the pointer or at the viewport centre and enters inline name-edit immediately. |
-| FR-1.2  | P0       | The user can add an attribute to an entity via the entity's inline `+` affordance or the inspector panel. New attributes append to the entity's attribute list and enter inline edit.                         |
-| FR-1.3  | P0       | The user can set, per attribute: name, data type (free text with autocomplete over common types), primary key, unique, nullable, and comment.                                                                 |
-| FR-1.4  | P0       | The user can create a relationship by dragging from a connection handle on one entity to another, or by selecting two entities and pressing `R`.                                                              |
-| FR-1.5  | P0       | The user can set, per relationship: name, and for each participant, cardinality (one/many) and participation (partial/total). Defaults to `1 : 0..N`.                                                         |
-| FR-1.6  | P0       | The user can rename any element inline (double-click) and via the inspector. Renames propagate to all references.                                                                                             |
-| FR-1.7  | P0       | The user can delete any element. Deleting an entity prompts if relationships would be orphaned, and offers "delete entity and its N relationships" or cancel.                                                 |
-| FR-1.8  | P0       | An inspector panel shows the full editable property set for the current selection, and supports multi-select for common properties.                                                                           |
-| FR-1.9  | P1       | The user can mark an entity as weak and designate its identifying relationship. The UI blocks marking an entity weak if it has no candidate identifying relationship, with an explanatory message.            |
-| FR-1.10 | P1       | The user can mark attributes as multivalued or derived, and can nest attributes one level to form composite attributes.                                                                                       |
-| FR-1.11 | P1       | The user can designate an attribute as a foreign key targeting a specific attribute on another entity, with a picker restricted to key attributes.                                                            |
-| FR-1.12 | P1       | The user can create recursive relationships (both participants the same entity) with distinct role names per side.                                                                                            |
-| FR-1.13 | P2       | The user can create n-ary (3+ participant) relationships, rendered as an explicit hub node.                                                                                                                   |
-| FR-1.14 | P2       | The user can create ISA/generalization hierarchies with disjoint/overlapping and total/partial constraints.                                                                                                   |
-| FR-1.15 | P2       | The user can assign entities to named, colour-coded subject areas (groups).                                                                                                                                   |
+| ID      | Priority | Requirement                                                                                                                                                                                                   | Status                                                      |
+| ------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| FR-1.1  | P0       | The user can create an entity via toolbar button, canvas context menu, or keyboard shortcut (`E`). The new entity is placed at the pointer or at the viewport centre and enters inline name-edit immediately. | Done                                                        |
+| FR-1.2  | P0       | The user can add an attribute to an entity via the entity's inline `+` affordance or the inspector panel. New attributes append to the entity's attribute list and enter inline edit.                         | Done                                                        |
+| FR-1.3  | P0       | The user can set, per attribute: name, data type (free text with autocomplete over common types), primary key, unique, nullable, and comment.                                                                 | Done                                                        |
+| FR-1.4  | P0       | The user can create a relationship by dragging from a connection handle on one entity to another, or by selecting two entities and pressing `R`.                                                              | Done                                                        |
+| FR-1.5  | P0       | The user can set, per relationship: name, and for each participant, cardinality (one/many) and participation (partial/total). Defaults to `1 : 0..N`.                                                         | Done                                                        |
+| FR-1.6  | P0       | The user can rename any element inline (double-click) and via the inspector. Renames propagate to all references.                                                                                             | Done                                                        |
+| FR-1.7  | P0       | The user can delete any element. Deleting an entity prompts if relationships would be orphaned, and offers "delete entity and its N relationships" or cancel.                                                 | Partial — cascade stated in the panel; no confirm dialog    |
+| FR-1.8  | P0       | An inspector panel shows the full editable property set for the current selection, and supports multi-select for common properties.                                                                           | Done                                                        |
+| FR-1.9  | P1       | The user can mark an entity as weak and designate its identifying relationship. The UI blocks marking an entity weak if it has no candidate identifying relationship, with an explanatory message.            | Done                                                        |
+| FR-1.10 | P1       | The user can mark attributes as multivalued or derived, and can nest attributes one level to form composite attributes.                                                                                       | Partial — flags settable; composite nesting only via import |
+| FR-1.11 | P1       | The user can designate an attribute as a foreign key targeting a specific attribute on another entity, with a picker restricted to key attributes.                                                            | Done                                                        |
+| FR-1.12 | P1       | The user can create recursive relationships (both participants the same entity) with distinct role names per side.                                                                                            | Done                                                        |
+| FR-1.13 | P2       | The user can create n-ary (3+ participant) relationships, rendered as an explicit hub node.                                                                                                                   | Open (V2)                                                   |
+| FR-1.14 | P2       | The user can create ISA/generalization hierarchies with disjoint/overlapping and total/partial constraints.                                                                                                   | Open (V2)                                                   |
+| FR-1.15 | P2       | The user can assign entities to named, colour-coded subject areas (groups).                                                                                                                                   | Open (V2)                                                   |
 
 ### 4.2 Canvas, zoom, pan, navigation
 
-| ID      | Priority | Requirement                                                                                                                                                                                                                |
-| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-2.1  | P0       | The canvas supports continuous zoom from 10% to 300% via scroll wheel, trackpad pinch, `Ctrl +` / `Ctrl -`, and on-screen controls. Zoom is anchored to the pointer.                                                       |
-| FR-2.2  | P0       | The canvas supports panning by space-drag, middle-mouse drag, trackpad two-finger scroll, and arrow keys.                                                                                                                  |
-| FR-2.3  | P0       | "Fit to view" (`Shift+1`) and "zoom to selection" (`Shift+2`) commands. Current zoom percentage is displayed and directly editable.                                                                                        |
-| FR-2.4  | P0       | Zoom-driven level of detail per §2.2, with a manual override to force L0/L1/L2 globally.                                                                                                                                   |
-| FR-2.5  | P0       | A minimap in a canvas corner shows the whole diagram, the current viewport rectangle, and supports click-to-jump and drag-to-pan. Collapsible.                                                                             |
-| FR-2.6  | P0       | A search box (`Ctrl+K`) does fuzzy matching over entity names, attribute names, and relationship names. Selecting a result pans and zooms to the target and selects it. Results show which entity an attribute belongs to. |
-| FR-2.7  | P1       | Entities can be individually pinned to full detail regardless of zoom level.                                                                                                                                               |
-| FR-2.8  | P1       | "Isolate" mode: with an entity selected, entities more than N hops away are hidden or heavily dimmed. N adjustable 1–3.                                                                                                    |
-| FR-2.9  | P1       | Marquee (rubber-band) multi-select and shift-click additive selection.                                                                                                                                                     |
-| FR-2.10 | P2       | Bookmarked viewports the user can name and jump between.                                                                                                                                                                   |
+| ID      | Priority | Requirement                                                                                                                                                                                                                | Status                                                         |
+| ------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| FR-2.1  | P0       | The canvas supports continuous zoom from 10% to 300% via scroll wheel, trackpad pinch, `Ctrl +` / `Ctrl -`, and on-screen controls. Zoom is anchored to the pointer.                                                       | Done                                                           |
+| FR-2.2  | P0       | The canvas supports panning by space-drag, middle-mouse drag, trackpad two-finger scroll, and arrow keys.                                                                                                                  | Done                                                           |
+| FR-2.3  | P0       | "Fit to view" (`Shift+1`) and "zoom to selection" (`Shift+2`) commands. Current zoom percentage is displayed and directly editable.                                                                                        | Partial — controls only; no keyboard shortcut                  |
+| FR-2.4  | P0       | Zoom-driven level of detail per §2.2, with a manual override to force L0/L1/L2 globally.                                                                                                                                   | Done                                                           |
+| FR-2.5  | P0       | A minimap in a canvas corner shows the whole diagram, the current viewport rectangle, and supports click-to-jump and drag-to-pan. Collapsible.                                                                             | Done                                                           |
+| FR-2.6  | P0       | A search box (`Ctrl+K`) does fuzzy matching over entity names, attribute names, and relationship names. Selecting a result pans and zooms to the target and selects it. Results show which entity an attribute belongs to. | **Open — next priority**                                       |
+| FR-2.7  | P1       | Entities can be individually pinned to full detail regardless of zoom level.                                                                                                                                               | Partial — model and renderer support pins; no UI control       |
+| FR-2.8  | P1       | "Isolate" mode: with an entity selected, entities more than N hops away are hidden or heavily dimmed. N adjustable 1–3.                                                                                                    | Partial — traversal written and tested; not wired to a control |
+| FR-2.9  | P1       | Marquee (rubber-band) multi-select and shift-click additive selection.                                                                                                                                                     | Open                                                           |
+| FR-2.10 | P2       | Bookmarked viewports the user can name and jump between.                                                                                                                                                                   | Open (V2)                                                      |
 
 ### 4.3 Layout
 
-| ID     | Priority | Requirement                                                                                                                       |
-| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| FR-3.1 | P0       | An "auto-layout" command arranges all entities using a layered algorithm with orthogonal edge routing, minimising edge crossings. |
-| FR-3.2 | P0       | Auto-layout runs off the main thread. The UI remains responsive and shows progress for large schemas.                             |
-| FR-3.3 | P0       | Entities can be dragged manually; manual positions persist and are not overwritten unless the user re-runs auto-layout.           |
-| FR-3.4 | P0       | Auto-layout is a single undoable operation.                                                                                       |
-| FR-3.5 | P1       | Snap-to-grid (toggleable) and alignment guides while dragging.                                                                    |
-| FR-3.6 | P1       | Layout algorithm selectable: layered (default), force-directed, and tree/radial for hierarchy-shaped schemas.                     |
-| FR-3.7 | P1       | "Auto-layout selection only", leaving the rest of the diagram untouched.                                                          |
-| FR-3.8 | P2       | Incremental layout — newly added entities are placed sensibly relative to their neighbours without disturbing existing positions. |
+| ID     | Priority | Requirement                                                                                                                       | Status                                                        |
+| ------ | -------- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| FR-3.1 | P0       | An "auto-layout" command arranges all entities using a layered algorithm with orthogonal edge routing, minimising edge crossings. | **Broken in the browser** — see the note under this table     |
+| FR-3.2 | P0       | Auto-layout runs off the main thread. The UI remains responsive and shows progress for large schemas.                             | **Broken in the browser** — the worker is the reason it fails |
+| FR-3.3 | P0       | Entities can be dragged manually; manual positions persist and are not overwritten unless the user re-runs auto-layout.           | Done                                                          |
+| FR-3.4 | P0       | Auto-layout is a single undoable operation.                                                                                       | Unverifiable while FR-3.1 is broken — the command never runs  |
+| FR-3.5 | P1       | Snap-to-grid (toggleable) and alignment guides while dragging.                                                                    | Open                                                          |
+| FR-3.6 | P1       | Layout algorithm selectable: layered (default), force-directed, and tree/radial for hierarchy-shaped schemas.                     | Partial — three presets implemented; no UI selector           |
+| FR-3.7 | P1       | "Auto-layout selection only", leaving the rest of the diagram untouched.                                                          | Partial — engine supports it; no UI entry point               |
+| FR-3.8 | P2       | Incremental layout — newly added entities are placed sensibly relative to their neighbours without disturbing existing positions. | Open (V2)                                                     |
 
 ### 4.4 Interactive highlighting
 
-| ID     | Priority | Requirement                                                                                                                                                                                                                                     |
-| ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-4.1 | P0       | Hovering a relationship connector emphasises it (increased stroke weight, accent colour, raised z-order) and outlines both connected entities, while all other elements drop to reduced opacity. Transition ≤ 150 ms. **No looping animation.** |
-| FR-4.2 | P0       | Hovering an entity emphasises the entity and all its incident relationships and their far-end entities, dimming everything else.                                                                                                                |
-| FR-4.3 | P0       | A tooltip on relationship hover shows the relationship name, both entity names, and the cardinality in readable prose ("Each CUSTOMER places zero or more ORDERs").                                                                             |
-| FR-4.4 | P1       | Clicking a relationship makes the highlight sticky until dismissed, so the user can pan while tracing.                                                                                                                                          |
-| FR-4.5 | P1       | Hovering a foreign-key attribute row highlights the specific connector it participates in, not just all of the entity's connectors.                                                                                                             |
-| FR-4.6 | P2       | Optional single-pass directional pulse along the hovered connector, off by default and suppressed under `prefers-reduced-motion`.                                                                                                               |
+| ID     | Priority | Requirement                                                                                                                                                                                                                                     | Status                                                         |
+| ------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| FR-4.1 | P0       | Hovering a relationship connector emphasises it (increased stroke weight, accent colour, raised z-order) and outlines both connected entities, while all other elements drop to reduced opacity. Transition ≤ 150 ms. **No looping animation.** | Done                                                           |
+| FR-4.2 | P0       | Hovering an entity emphasises the entity and all its incident relationships and their far-end entities, dimming everything else.                                                                                                                | Done                                                           |
+| FR-4.3 | P0       | A tooltip on relationship hover shows the relationship name, both entity names, and the cardinality in readable prose ("Each CUSTOMER places zero or more ORDERs").                                                                             | Partial — prose reading in the inspector, not a canvas tooltip |
+| FR-4.4 | P1       | Clicking a relationship makes the highlight sticky until dismissed, so the user can pan while tracing.                                                                                                                                          | Open                                                           |
+| FR-4.5 | P1       | Hovering a foreign-key attribute row highlights the specific connector it participates in, not just all of the entity's connectors.                                                                                                             | Done                                                           |
+| FR-4.6 | P2       | Optional single-pass directional pulse along the hovered connector, off by default and suppressed under `prefers-reduced-motion`.                                                                                                               | Open (V2)                                                      |
 
 ### 4.5 Notation
 
-| ID     | Priority | Requirement                                                                                                                                                                                                                                                                     |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| FR-5.1 | P0       | Compact (crow's foot / IE) rendering is the default: entities as boxes with attribute rows, PK underlined, weak entities double-bordered, cardinality drawn as crow's foot endpoints.                                                                                           |
-| FR-5.2 | P0       | The compact renderer encodes all Chen-only semantics as row-level glyph badges (multivalued, derived, composite, PK, FK, unique) with a legend available from the toolbar.                                                                                                      |
-| FR-5.3 | P1       | A Chen mode renders classical notation for the full canvas: rectangle = entity, double rectangle = weak entity, oval = attribute, double oval = multivalued, dashed oval = derived, diamond = relationship, double diamond = identifying relationship, underline = primary key. |
-| FR-5.4 | P1       | Chen mode is additionally available as a focused sub-view for a single selected entity or small selection, rendered in a panel without disturbing the main canvas.                                                                                                              |
-| FR-5.5 | P1       | Switching notation mode preserves the model exactly; no data is lost or altered in either direction.                                                                                                                                                                            |
-| FR-5.6 | P1       | Chen mode warns when the visible element count exceeds a legibility threshold and offers to switch to focused sub-view instead.                                                                                                                                                 |
-| FR-5.7 | P2       | User-selectable notation theme (crow's foot / IE / UML-ish / Barker) driven by a swappable glyph set.                                                                                                                                                                           |
+| ID     | Priority | Requirement                                                                                                                                                                                                                                                                     | Status                     |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| FR-5.1 | P0       | Compact (crow's foot / IE) rendering is the default: entities as boxes with attribute rows, PK underlined, weak entities double-bordered, cardinality drawn as crow's foot endpoints.                                                                                           | Done                       |
+| FR-5.2 | P0       | The compact renderer encodes all Chen-only semantics as row-level glyph badges (multivalued, derived, composite, PK, FK, unique) with a legend available from the toolbar.                                                                                                      | Done                       |
+| FR-5.3 | P1       | A Chen mode renders classical notation for the full canvas: rectangle = entity, double rectangle = weak entity, oval = attribute, double oval = multivalued, dashed oval = derived, diamond = relationship, double diamond = identifying relationship, underline = primary key. | Open (V2)                  |
+| FR-5.4 | P1       | Chen mode is additionally available as a focused sub-view for a single selected entity or small selection, rendered in a panel without disturbing the main canvas.                                                                                                              | Open (V2)                  |
+| FR-5.5 | P1       | Switching notation mode preserves the model exactly; no data is lost or altered in either direction.                                                                                                                                                                            | n/a until Chen mode exists |
+| FR-5.6 | P1       | Chen mode warns when the visible element count exceeds a legibility threshold and offers to switch to focused sub-view instead.                                                                                                                                                 | Open (V2)                  |
+| FR-5.7 | P2       | User-selectable notation theme (crow's foot / IE / UML-ish / Barker) driven by a swappable glyph set.                                                                                                                                                                           | Open (V2)                  |
 
 ### 4.6 Export and import
 
-| ID     | Priority | Requirement                                                                                                                                                                                                              |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| FR-6.1 | P0       | Export the diagram as a Mermaid `.mmd` file, downloadable, whose content parses and renders in Mermaid Live Editor without error.                                                                                        |
-| FR-6.2 | P0       | Export preview: show the generated Mermaid source in a panel with syntax highlighting before download, with copy-to-clipboard.                                                                                           |
-| FR-6.3 | P0       | Export reports lossiness: a clear list of every construct that was dropped or approximated, with a link to the affected element.                                                                                         |
-| FR-6.4 | P0       | Save and open the tool's native `.erd.json` file, which round-trips the model and layout with zero loss. Schema-versioned with a `formatVersion` field.                                                                  |
-| FR-6.5 | P0       | Export the current canvas as PNG and SVG.                                                                                                                                                                                |
-| FR-6.6 | P1       | The export subsystem is a registry of format adapters conforming to a common interface, such that adding a format requires adding one module and registering it — no changes to the domain model, renderer, or UI shell. |
-| FR-6.7 | P2       | Additional exporters: DBML, SQL DDL (PostgreSQL / MySQL dialects), JSON Schema, PlantUML, PDF.                                                                                                                           |
-| FR-6.8 | P2       | Importers: Mermaid `.mmd`, DBML, SQL DDL. Import runs auto-layout since none of these formats carry positions.                                                                                                           |
+| ID     | Priority | Requirement                                                                                                                                                                                                              | Status                                                                                                                                                                  |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| FR-6.1 | P0       | Export the diagram as a Mermaid `.mmd` file, downloadable, whose content parses and renders in Mermaid Live Editor without error.                                                                                        | Done                                                                                                                                                                    |
+| FR-6.2 | P0       | Export preview: show the generated Mermaid source in a panel with syntax highlighting before download, with copy-to-clipboard.                                                                                           | Done                                                                                                                                                                    |
+| FR-6.3 | P0       | Export reports lossiness: a clear list of every construct that was dropped or approximated, with a link to the affected element.                                                                                         | Done                                                                                                                                                                    |
+| FR-6.4 | P0       | Save and open the tool's native `.erd.json` file, which round-trips the model and layout with zero loss. Schema-versioned with a `formatVersion` field.                                                                  | Done                                                                                                                                                                    |
+| FR-6.5 | P0       | Export the current canvas as PNG and SVG.                                                                                                                                                                                | **Done** — renders the WHOLE diagram off-screen at L2, not the visible screenful; verified in Chrome, see §7.3                                                          |
+| FR-6.6 | P1       | The export subsystem is a registry of format adapters conforming to a common interface, such that adding a format requires adding one module and registering it — no changes to the domain model, renderer, or UI shell. | Done                                                                                                                                                                    |
+| FR-6.7 | P2       | Additional exporters: DBML, SQL DDL (PostgreSQL / MySQL dialects), JSON Schema, PlantUML, PDF.                                                                                                                           | Open (V2) — DBML is one directory plus a registry line                                                                                                                  |
+| FR-6.8 | P2       | Importers: Mermaid `.mmd`, DBML, SQL DDL. Import runs auto-layout since none of these formats carry positions.                                                                                                           | **Partial** — `.mmd`, `.sql` (PostgreSQL/MySQL) and `.erd.json` all parse, but the auto-layout half fails (FR-3.1), so an imported schema lands on the placeholder grid |
 
 ### 4.7 Editing safety
 
-| ID     | Priority | Requirement                                                                                                                                                                                |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| FR-7.1 | P0       | Undo/redo across all model and layout mutations, minimum 100 steps, via `Ctrl+Z` / `Ctrl+Shift+Z` and toolbar. Compound operations (auto-layout, cascade delete, import) undo as one step. |
-| FR-7.2 | P0       | Autosave to browser storage, debounced, with a visible save indicator and last-saved timestamp.                                                                                            |
-| FR-7.3 | P0       | Recovery on reload: the last autosaved state is restored, with an explicit "discard and start new" option.                                                                                 |
-| FR-7.4 | P1       | Copy / cut / paste / duplicate of entities, including within-selection relationships. Pasted entities get unique names (`CUSTOMER_copy`).                                                  |
-| FR-7.5 | P1       | Multiple named diagrams in local storage, with a diagram list/switcher.                                                                                                                    |
-| FR-7.6 | P2       | Named local snapshots with restore, and a structural diff view between two snapshots.                                                                                                      |
+| ID     | Priority | Requirement                                                                                                                                                                                | Status    |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------- |
+| FR-7.1 | P0       | Undo/redo across all model and layout mutations, minimum 100 steps, via `Ctrl+Z` / `Ctrl+Shift+Z` and toolbar. Compound operations (auto-layout, cascade delete, import) undo as one step. | Done      |
+| FR-7.2 | P0       | Autosave to browser storage, debounced, with a visible save indicator and last-saved timestamp.                                                                                            | Done      |
+| FR-7.3 | P0       | Recovery on reload: the last autosaved state is restored, with an explicit "discard and start new" option.                                                                                 | Done      |
+| FR-7.4 | P1       | Copy / cut / paste / duplicate of entities, including within-selection relationships. Pasted entities get unique names (`CUSTOMER_copy`).                                                  | Open      |
+| FR-7.5 | P1       | Multiple named diagrams in local storage, with a diagram list/switcher.                                                                                                                    | Done      |
+| FR-7.6 | P2       | Named local snapshots with restore, and a structural diff view between two snapshots.                                                                                                      | Open (V2) |
 
 ### 4.8 Validation
 
-| ID     | Priority | Requirement                                                                                                                                                                                                        |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| FR-8.1 | P0       | A validation panel lists issues by severity (error / warning / info); clicking an issue selects and reveals the offending element.                                                                                 |
-| FR-8.2 | P0       | Errors detected: duplicate entity names; duplicate attribute names within an entity; relationship with a missing endpoint; weak entity with no identifying relationship; empty required name.                      |
-| FR-8.3 | P1       | Warnings detected: entity with no primary key; entity with no relationships (orphan); FK data type mismatched against its target PK; M:N relationship not resolved to an associative entity; unnamed relationship. |
-| FR-8.4 | P1       | Inline markers on the canvas for elements with errors, with a badge count on the validation panel toggle.                                                                                                          |
-| FR-8.5 | P1       | Validation runs incrementally on change without blocking input.                                                                                                                                                    |
-| FR-8.6 | P2       | Normalization hints (1NF/2NF/3NF observations) as info-level issues.                                                                                                                                               |
+| ID     | Priority | Requirement                                                                                                                                                                                                        | Status                                                                                                          |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| FR-8.1 | P0       | A validation panel lists issues by severity (error / warning / info); clicking an issue selects and reveals the offending element.                                                                                 | **Done** — panel lists by severity; clicking an issue selects and reveals it                                    |
+| FR-8.2 | P0       | Errors detected: duplicate entity names; duplicate attribute names within an entity; relationship with a missing endpoint; weak entity with no identifying relationship; empty required name.                      | **Done** — `duplicate-names`, `empty-name`, `weak-entity-identity`; missing endpoints are refused by the schema |
+| FR-8.3 | P1       | Warnings detected: entity with no primary key; entity with no relationships (orphan); FK data type mismatched against its target PK; M:N relationship not resolved to an associative entity; unnamed relationship. | Open                                                                                                            |
+| FR-8.4 | P1       | Inline markers on the canvas for elements with errors, with a badge count on the validation panel toggle.                                                                                                          | Open                                                                                                            |
+| FR-8.5 | P1       | Validation runs incrementally on change without blocking input.                                                                                                                                                    | Open                                                                                                            |
+| FR-8.6 | P2       | Normalization hints (1NF/2NF/3NF observations) as info-level issues.                                                                                                                                               | Open (V2)                                                                                                       |
 
 ### 4.9 Application shell
 
-| ID     | Priority | Requirement                                                                                             |
-| ------ | -------- | ------------------------------------------------------------------------------------------------------- |
-| FR-9.1 | P0       | Keyboard shortcut reference accessible via `?`.                                                         |
-| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    |
-| FR-9.3 | P1       | Light and dark themes, following system preference by default.                                          |
-| FR-9.4 | P1       | An onboarding sample schema loadable in one click, plus an empty-state canvas with clear first actions. |
-| FR-9.5 | P2       | Installable as a PWA with full offline capability.                                                      |
+| ID     | Priority | Requirement                                                                                             | Status                       |
+| ------ | -------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
+| FR-9.1 | P0       | Keyboard shortcut reference accessible via `?`.                                                         | Open                         |
+| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    | **Open** — pairs with FR-2.6 |
+| FR-9.3 | P1       | Light and dark themes, following system preference by default.                                          | Done                         |
+| FR-9.4 | P1       | An onboarding sample schema loadable in one click, plus an empty-state canvas with clear first actions. | Done                         |
+| FR-9.5 | P2       | Installable as a PWA with full offline capability.                                                      | Open (V2)                    |
 
 ---
 
@@ -268,17 +275,17 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 
 Measured on the reference machine (2020-era laptop, 4-core CPU, integrated graphics, Chrome, 1920×1080) against the **reference schema**: 120 entities, 8 attributes each (960 attributes), 150 relationships.
 
-| ID      | Requirement                                                                                                            |
-| ------- | ---------------------------------------------------------------------------------------------------------------------- |
-| NFR-1.1 | Pan and zoom sustain ≥ 55 FPS at every zoom level with the reference schema loaded.                                    |
-| NFR-1.2 | Initial load-and-render of the reference schema from local storage completes in ≤ 2.0 s.                               |
-| NFR-1.3 | Input-to-visual-feedback latency for hover highlight, selection, and inline edit keystrokes is ≤ 100 ms at p95.        |
-| NFR-1.4 | Auto-layout of the reference schema completes in ≤ 5 s and never blocks the main thread for more than 50 ms at a time. |
-| NFR-1.5 | Undo and redo complete in ≤ 100 ms.                                                                                    |
-| NFR-1.6 | Mermaid export of the reference schema completes in ≤ 1 s.                                                             |
-| NFR-1.7 | Search returns results within 50 ms of the final keystroke.                                                            |
-| NFR-1.8 | Initial JS bundle ≤ 500 KB gzipped; layout engine and exporters lazy-loaded.                                           |
-| NFR-1.9 | Memory footprint stays under 500 MB with the reference schema and a full 100-step undo stack.                          |
+| ID      | Requirement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NFR-1.1 | Pan and zoom sustain ≥ 55 FPS at every zoom level with the reference schema loaded.                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| NFR-1.2 | Initial load-and-render of the reference schema from local storage completes in ≤ 2.0 s.                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| NFR-1.3 | Input-to-visual-feedback latency for hover highlight, selection, and inline edit keystrokes is ≤ 100 ms at p95.                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| NFR-1.4 | Auto-layout of the reference schema completes in ≤ 5 s and never blocks the main thread for more than 50 ms at a time. **Measured: 836 ms** for 120 entities, 885 ms for 300 — but measured IN-PROCESS by `pnpm test:perf`, calling ELK directly on the test thread. The claim that "ELK runs in a Web Worker, so the main thread is never blocked" was never true in a browser: constructing that worker throws (FR-3.1). The algorithm meets the budget; the wiring does not exist. Re-measure in Chrome once FR-3.1 is fixed. |
+| NFR-1.5 | Undo and redo complete in ≤ 100 ms.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| NFR-1.6 | Mermaid export of the reference schema completes in ≤ 1 s.                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| NFR-1.7 | Search returns results within 50 ms of the final keystroke.                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| NFR-1.8 | Initial JS bundle ≤ 500 KB gzipped; layout engine and exporters lazy-loaded.                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| NFR-1.9 | Memory footprint stays under 500 MB with the reference schema and a full 100-step undo stack.                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
 ### 5.2 Scalability
 
@@ -352,7 +359,10 @@ Measured on the reference machine (2020-era laptop, 4-core CPU, integrated graph
 
 ---
 
-## 6. Recommended technology stack
+## 6. Technology stack
+
+> **As built.** The table below is what is installed. Four versions differ from v1.0's
+> recommendation and one dependency was added; §12.1 records each and why.
 
 Everything below is open source and permissively licensed except where noted.
 
@@ -389,7 +399,7 @@ The known cost: nodes are DOM elements, so several thousand _simultaneously visi
 
 **elkjs for layout.** React Flow deliberately ships no auto-layout, so this must be chosen separately. The realistic candidates are dagre (simple, layered, unmaintained-ish) and elkjs. ELK's `layered` algorithm is the Sugiyama-style pipeline — cycle breaking, layering, crossing minimisation, Brandes–Köpf coordinate assignment — and, unlike dagre, it supports **orthogonal edge routing with computed bend points** and **ports**, so relationship connectors can attach to the specific attribute row that carries the foreign key rather than to the middle of a box. That is a meaningful legibility win at 100+ tables. It also supports compound nodes, which is how subject areas (FR-1.15) get implemented in V2 without a rewrite.
 
-Two caveats, both handled: elkjs is EPL-2.0 (weak copyleft), so per NFR-8.2 it is consumed unmodified and hidden behind `src/layout/LayoutEngine.ts`, making dagre or a custom layout a drop-in replacement. And elkjs is GWT-transpiled Java, which is slow — hence NFR-1.4's requirement that it run in a Web Worker (`workerUrl`), which elkjs supports natively.
+Two caveats, both handled: elkjs is EPL-2.0 (weak copyleft), so per NFR-8.2 it is consumed unmodified and hidden behind `src/layout/LayoutEngine.ts`, making dagre or a custom layout a drop-in replacement. And elkjs is GWT-transpiled Java, which is slow — hence NFR-1.4's requirement that it run in a Web Worker, which elkjs supports natively **via `workerUrl` / `workerFactory` on the main thread**. That distinction was missed in the implementation, which instead imports `elk.bundled.js` inside a worker of our own; `elk.bundled.js` is the main-thread build whose job is to start a worker, and it throws when it is already in one. See FR-3.1 and `NEXT.md` Tier 1.
 
 **Zustand + a hand-rolled command stack, rather than a generic undo library.** Generic undo libraries snapshot state. For a 120-entity diagram with a 100-step history that is expensive in memory and produces bad undo granularity — dragging a node produces hundreds of intermediate states. A command pattern in the domain layer (`AddEntityCommand`, `MoveEntitiesCommand`, `AutoLayoutCommand`, each with `apply`/`invert`) gives semantic undo steps, cheap storage, coalescing of drag streams into one step, and compound transactions for FR-7.1. It also gives the V2 collaboration story a head start, since commands are the natural unit to transmit.
 
@@ -477,6 +487,18 @@ Registration is one line in `src/io/registry.ts`. Nothing else in the codebase k
 | **Subject areas / groups**    | —                                                                                | **dropped**                                                            |
 
 Every row marked approximated, decomposed, or dropped produces a `LossItem` when it occurs.
+
+### 7.3 Image export (FR-6.5)
+
+PNG and SVG do not fit the `ExportAdapter` interface above, and the deviation is deliberate rather than an oversight.
+
+An image is not a serialisation of the IR; it is a photograph of the renderer. What lands in the file depends on the notation, the level of detail, the theme and the CSS, none of which the IR knows about. Writing it as `export(diagram) => string` would have meant a second renderer inside `io` drawing SVG from the model directly — and a second renderer drifts from the one on screen within a release. So the input is what the user sees: a DOM subtree. `ImageExportAdapter` is therefore its own interface with its own registry list (`imageExportAdapters`), and `exportAdapters` remains a list of things you can call `export(diagram)` on.
+
+Three consequences worth recording:
+
+1. **The live canvas cannot be photographed.** It runs `onlyRenderVisibleElements` (NFR-2.4), so off-screen nodes are absent from the DOM — not clipped, absent. Capturing it yields the current screenful and silently omits the rest of the schema. So export mounts its **own** off-screen surface (`features/export/ExportSurface.tsx`), sized from the diagram's own bounds, with culling off and the camera pinned at zoom 1.
+2. **It always renders at L2 and read-only.** A picture of a schema with its fields hidden is not worth having, whatever zoom the user was at; and the "add field" row and connection handles are editing affordances, so an image of them is an image of a tool rather than of a schema.
+3. **The capability set answers a different question.** For every other format `exact` means "round-trips". Nothing round-trips through a PNG, so for this adapter `exact` means **visible in the image**. The format-level fact — that an image cannot be read back in — is stated once, in the adapter's `note`, because it has no element to hang a `LossItem` off.
 
 ---
 
@@ -678,6 +700,11 @@ ui  ←  features  ←  store  ←  domain
 
 ## 9. Release plan
 
+> **Status.** V1 is substantially delivered, and two items originally scoped to V2 —
+> SQL and Mermaid **import** — were pulled forward, because import is what makes the
+> 100-table target reachable in practice rather than only in a fixture. Four V1 items
+> remain open; they are listed in §13.
+
 **V1 (this SRS):** all P0 requirements, plus as many P1 as schedule allows. Browser-only, single-user, Mermaid + native JSON + PNG/SVG export.
 
 **V2 (candidate scope):** Mermaid / DBML / SQL DDL **import** — this is what makes 100+ tables a realistic scenario rather than a stress-test fixture, since nobody hand-draws 100 tables; additional exporters; subject areas; n-ary relationships; ISA hierarchies; snapshots and diff.
@@ -705,3 +732,151 @@ ui  ←  features  ←  store  ←  domain
 2. **Data type semantics.** Currently free text with autocomplete. If SQL DDL export is likely in V2, a dialect-aware type system in V1 would save a migration.
 3. **Reference schema size.** All performance budgets are pinned to 120 entities / 960 attributes / 150 relationships. If the real target is materially larger, NFR-1.x needs restating before implementation starts.
 4. **Chen full-canvas mode.** Given §2.1, is FR-5.3 (whole-canvas Chen) worth its cost, or is FR-5.4 (focused sub-view) sufficient to satisfy the notation requirement?
+
+---
+
+## 12. Changes from v1.0
+
+### 12.1 Dependency versions
+
+Recorded in full in `docs/adr/0005-stage1-version-deviations.md`.
+
+| v1.0 said              | Built with               | Why                                                                                                                                                                                                                         |
+| ---------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Vite 6                 | Vite 8                   | `@vitejs/plugin-react@6` requires `vite: ^8`.                                                                                                                                                                               |
+| TypeScript 5.x         | TypeScript 6.0           | Current default. **A ceiling, not a floor** — `typescript-eslint@8` peers at `<6.1`, so TS 7 breaks linting outright.                                                                                                       |
+| Zod 3 (implied)        | Zod 4                    | Recursive schemas via object getters remove the `z.lazy()` plus hand-written interface that `Attribute.children` would otherwise need. Cost: `.default()` no longer validates, hence the `.prefault()` rule in `schema.ts`. |
+| `eslint-plugin-import` | `eslint-plugin-import-x` | The original peers at ESLint `^9`; we are on 10.                                                                                                                                                                            |
+| —                      | `fake-indexeddb` added   | jsdom has no IndexedDB, leaving the Dexie repository at 45% coverage. Dev-only.                                                                                                                                             |
+
+### 12.2 Design decisions taken during the build
+
+**Commands describe a mutation; the inverse is derived.** §8 of v1.0 sketched
+`Command { apply, invert }`. A hand-written inverse duplicates model knowledge, worst
+exactly where it is most dangerous — `deleteEntity` would have to remember the entity,
+its relationships, every inbound foreign key, its position and its pin. Commands now
+supply only `mutate(draft)` and `CommandStack` derives both directions from Immer
+patches. The `invert` half still exists; it is computed rather than written.
+See `docs/adr/0003`.
+
+**The LOD vocabulary lives in `lib`, not `render`.** v1.0's §8 file list put `lod.ts`
+under `render/`, which contradicts its own §8.1 dependency rule: LOD level is viewport
+state, so `store/viewportStore.ts` needs it, and `store` may not import `render`. Split
+by nature instead — the type, thresholds and zoom mapping in `lib/lod.ts`; the renderer's
+use of them in `render/lod.ts`.
+
+**`parseDiagramDocument` lives in `io`, not `persistence`.** Both the storage reader and
+the file importer need it, and `persistence` may depend on `io` while the reverse is
+forbidden. The boundary rule caught this.
+
+**Foreign keys and relationships are kept in step, one way.** Setting a reference in the
+inspector also draws the relationship if none exists. Clearing one does not delete the
+other: in both directions the remaining fact is still true, and discarding a user's work
+to enforce tidiness is worse than a diagram that is less specific than it could be.
+
+**Drag-to-connect from a field row wires the foreign key too.** Dragging
+`ORDER.customer_id` onto `CUSTOMER` means one thing; making the user then set the
+reference by hand would be asking them to say it twice. One undo step covers both.
+
+**The inspector appears only on selection.** 288 px of "select something" permanently
+narrows the canvas, which is the thing the user is there to look at.
+
+**Dimming settled at 55%, not 28%.** The original figure nearly erased the un-traced
+tables, which defeats the purpose — you trace a relationship in order to see it _in
+context_. Contrast now comes from the emphasis side: heavier stroke, stronger outline,
+raised z-order.
+
+**Nullability got a cue it did not have.** A trailing `?` on the type. Annotating
+`NOT NULL` instead was rejected because required columns are the minority in most
+schemas, so it would print more ink rather than less.
+
+### 12.3 Requirements interpreted rather than followed literally
+
+**FR-4.1 "highlight/blink".** Built as static emphasis plus dimming, no animation. §2.3
+argued this before implementation and using it confirmed the reasoning: flashing content
+is a WCAG 2.3.1 concern, and a blink makes the label you are hovering to read harder to
+read. Optional single-pulse motion (FR-4.6) remains available and unbuilt.
+
+**FR-6.8 import.** Delivered in V1 rather than V2, and extended: SQL DDL import covers
+PostgreSQL and MySQL with automatic dialect detection. The SQL reader is a deliberate
+subset — `CREATE TABLE`, inline and table-level constraints, and
+`ALTER TABLE ... ADD CONSTRAINT`. Unrecognised statements are counted and reported rather
+than failing the file, on the principle that a dump which is 90% readable should produce
+90% of a diagram.
+
+---
+
+## 13. What remains
+
+**The working queue lives in `NEXT.md`**, not here: which of these to do next, what is
+already diagnosed, and the current bug list. This section stays the requirement-level view
+of what is unbuilt. Sequencing in one file, requirement status in the other — and the two
+rows below that had to be corrected on 10 Sep 2026 are what happens when that slips.
+
+1. **Auto-layout (FR-3.1, FR-3.2), which is listed as Done above and is not.** It throws
+   in every browser, dev and production alike, so an imported schema stays on the
+   placeholder grid. It is a P0 and it blocks the product's strongest path. Diagnosis and
+   the recommended fix are in `NEXT.md` Tier 1 item 1. It is here rather than only in
+   `NEXT.md` because a requirement that ships broken belongs in the requirement view too.
+2. ~~**Validation panel (FR-8.1 to FR-8.5).**~~ **Done.** Eight rules in
+   `src/domain/validation/rules/`, the panel and toggle in
+   `src/features/validation-panel/`, 69 tests. Clicking an issue selects and reveals the
+   element (`useGoToIssue`).
+3. **Search and command palette (FR-2.6, FR-9.2).** At 100 tables this is worth more than
+   everything below it — and SQL import will make 100-table diagrams reachable in one
+   click once item 1 is fixed. `fuse.js` and `cmdk` were installed for this and have now been removed again:
+   they sat unused through six stages, and an unused dependency is a supply-chain and
+   audit cost with nothing on the other side of the ledger. Reinstate them when the work
+   starts, or decide then that a substring match over a hundred table names does not need
+   a fuzzy-search library.
+4. **Edges attaching to the foreign-key row** rather than to box centres. Per-row handles
+   exist; the edges ignore them. Needs a fallback for L0 and L1, where those handles are
+   not rendered.
+5. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
+   tested, only unwired); expanding one entity from the "N more" row; a keyboard shortcut
+   sheet (FR-9.1).
+6. DBML export (FR-6.7) — one directory plus one line in `src/io/registry.ts`.
+
+Deferred to V2 with slots reserved in the IR: n-ary relationships, ISA hierarchies,
+subject areas, snapshots and diff, Chen rendering mode.
+
+### 13.1 Two gaps that are not features
+
+**Nothing has been tested against a real schema.** Every performance figure comes from a
+generated fixture with uniform table sizes and tidy relationships. A real dump would say
+more in five minutes than another week of synthetic testing. Blocked behind FR-3.1: without
+auto-layout an imported dump only shows the placeholder grid.
+
+**~~`pnpm test:e2e` has never been executed.~~ Closed on 10 Sep 2026.** It runs on the
+system Chrome (`channel: 'chrome'`, so no browser download), covers 14 specs across boot,
+pointer gestures, drag-to-connect, the minimap, real IndexedDB and reload, and is part of
+`pnpm verify`. NFR-6.6's five critical paths are covered except auto-layout, whose spec is
+marked `test.fail()` because the feature is broken (FR-3.1).
+
+It found, on its first execution: two specs whose locators had rotted into ambiguity
+(`hasText: 'CUSTOMER'` also matched the box containing a `customer_id` field), one spec
+whose gesture React Flow could never have accepted, one that asserted nothing, and the
+FR-3.1 break itself. **A suite that has never been run is not coverage.** The same applies
+to every coverage exclusion in `vite.config.ts` that defers to it: `src/layout/worker/**`
+was excluded on the grounds that it "constructs a real Worker", and constructing that
+worker is precisely what does not work.
+
+Image export (FR-6.5, §7.3) **has now been run in Chrome and the output looked at.** It is
+worth recording what that caught, because it is the argument for why the unit suite could
+never have signed this off:
+
+1. `nodesInitialized` never became true, so the export sat on "Rendering…" forever. React
+   Flow only recomputes that flag when the `nodes` prop changes — which is before
+   measurement — and never again. Derived from `nodeLookup` instead.
+2. The captured element inherited `position: fixed; left: -100000px` into html-to-image's
+   `<foreignObject>`, putting the clone outside the SVG viewport. The output was a valid,
+   correctly sized, correctly coloured, **completely blank** 37 kB PNG.
+3. html-to-image copies computed styles only for `HTMLElement`, and an `SVGElement` is not
+   one. Every edge `<path>` lost its `fill: none` and filled its own bezier with black.
+   The export was a correct diagram with two large inkblots across it.
+
+All three produced a file, none produced an error, and every automated check — valid PNG,
+right dimensions, right background, plausible byte count — passed on all three. jsdom
+performs no layout and has no canvas, so a unit test cannot distinguish any of them from a
+correct export. **Image export is verified by looking at it. Change that code path and look
+at the output again.**

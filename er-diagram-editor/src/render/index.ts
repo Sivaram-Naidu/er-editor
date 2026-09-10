@@ -6,7 +6,18 @@ export {
   useEditorActions,
   type EditorActions,
 } from './reactflow/EditorActions'
-export { fallbackPosition, traceSets, type TraceSets } from './reactflow/trace'
+export {
+  fallbackPosition,
+  inFlightPositions,
+  measuredDimensions,
+  overlayNodes,
+  settledPositions,
+  sizesUnchanged,
+  traceSets,
+  type Size,
+  type TraceSets,
+} from './reactflow/trace'
+export type { PaneSize } from './reactflow/SurfaceObserver'
 export { EntityNode, type EntityNodeData } from './reactflow/nodes/EntityNode'
 export { AttributeRow } from './reactflow/nodes/AttributeRow'
 export { RelationshipEdge, type RelationshipEdgeData } from './reactflow/edges/RelationshipEdge'
