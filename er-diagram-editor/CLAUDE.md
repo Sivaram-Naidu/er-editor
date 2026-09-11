@@ -261,6 +261,25 @@ culling off.
   avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
   nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
   store here is Zustand, so this applies to all of them.
+- **Playwright's `mouse.move` then `mouse.down` is not a fast click — there is 172 ms
+  between them.** Each is its own CDP round trip. `coldClick`'s docstring is right that a
+  person does not DWELL, and it is still the correct way to catch a render-window bug, but
+  it is not a way to make two gestures overlap: an animation frame is ~16 ms and
+  `--erd-trace-duration` is 120 ms, so a hover started by the move has fully rendered and
+  finished transitioning before the press arrives. A whole fix was built on the assumption
+  that the two passes serialise before anyone measured the gap. Measure the gap.
+- **A change that its own test cannot distinguish from its opposite is not a fix.** The
+  deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
+  assertion still passed with the scheduler's behaviour inverted, which is what exposed it.
+  Mutate the code and re-run the guard before believing it.
+- **An A/B run measured as one block per condition measures the run order, not the code.**
+  Five CSS conditions swept forward made dimming look 70 ms expensive; the same sweep
+  reversed put every condition within 30 ms of the others, and interleaving them one sample
+  at a time produced an ordering that contradicts itself (a superset override "costing"
+  167 ms more than the subset inside it). The noise floor for click latency here is around
+  100 ms. Size a problem with a stopwatch if you must; never choose between two fixes with
+  one. Assert a mechanism instead — render counts, commits per gesture, whether a worker
+  was created.
 - **A computed-style assertion against a TRANSITIONED property has to be polled.** Opacity
   on `.erd-node` transitions over `--erd-trace-duration`, so reading `getComputedStyle`
   straight after the hover lands mid-fade and reports ~1. It failed three runs out of three

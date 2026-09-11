@@ -152,17 +152,27 @@ while the median moved by 10 ms. `pnpm test:perf:browser` reproduces it.
 
 ### Known broken
 
-1. **NFR-1.3 is still missed for a COLD CLICK when Detail is pinned to All fields.**
-   Median **99–108 ms** against a 100 ms budget. Hover is fixed — median 43–53 ms, down
-   from 59–99 — and a click with the pointer already resting on the box costs **25 ms**, so
-   what is left is the two arriving together. Tier 1 item 1. At the detail level the tool
-   actually uses at 120 tables (Follow zoom, so L0) everything is inside budget.
+1. **NFR-1.3 is still missed when a click follows the pointer onto a box and Detail is
+   pinned to All fields.** Median **99–108 ms** against a 100 ms budget. Hover is fixed —
+   median 43–53 ms, down from 59–99 — and the same click with the main thread settled after
+   the pointer arrives costs **25 ms**. The two figures have never been reconciled, and the
+   explanation on record until 11 Sep 2026 ("the hover and the selection arrive together")
+   is **wrong**: the press lands 172 ms after the move, by which time both the hover render
+   and its 120 ms transition are finished. Tier 1 item 1 carries what to do about it. At the
+   detail level the tool actually uses at 120 tables (Follow zoom, so L0) everything is
+   inside budget.
    **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
    single task that applies a layout, which is what it was always protecting against
    interference with. See the SRS row.
-2. **The p95 of any interaction measurement is not trustworthy on this machine.** Five
-   passes with no code change put hover's p95 anywhere between 56 and 170 ms while the
-   median moved by 10 ms. Read the medians; `perf.spec.ts` asserts on them for this reason.
+2. **Interaction timings on this machine have a noise floor of roughly 100 ms, which is
+   bigger than most changes worth making.** Five passes with no code change put hover's p95
+   anywhere between 56 and 170 ms while its median moved by 10 ms — so read the medians,
+   and `perf.spec.ts` asserts on them for that reason. But medians are not safe either
+   across a long run: an A/B of five CSS conditions drifted by ~90 ms between the forward
+   and reversed sweep, and produced a self-contradictory ordering even when interleaved
+   (Tier 1 item 1 has the numbers). **Use time to size a problem, never to choose between
+   two fixes.** For that, assert a mechanism — render counts, commits per gesture, whether
+   a worker was created — the way `redraw.test.tsx` and the auto-layout spec do.
 3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
@@ -328,44 +338,49 @@ with no overlaps at all, and the ~840 ms the perf suite reports in-process was a
 number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
 identified reason.
 
-### 1. A cold click costs a hover and a selection, back to back
+### 1. Why a click costs 100 ms when the click itself costs 25 ms
 
-**Rewritten 11 Sep 2026.** This slot used to say "stop rebuilding every node object on
-hover and on selection". That work is done and measured — see the browser table above — and
-it fixed hover. It did not fix the number the item was promoted for, and the reason is now
-known rather than suspected.
+**The diagnosis in this slot was wrong, and was corrected on 11 Sep 2026 by checking the
+harness instead of trusting it.** It said "a cold click costs a hover and a selection, back
+to back" and proposed deferring the hover by a frame so a press could overtake it. That was
+built, unit-tested, and then thrown away — because the press does not arrive within a frame.
 
-**Already established — do not redo this.**
+**Already established — do not redo any of this.**
 
-- **Hover is fixed.** Median at 120 entities / All fields went from 59–99 ms to 43–53 ms.
-  Two changes did it: `tracedAttributeIds` is now one set PER ENTITY rather than one for
-  the diagram (a shared Set minted a new identity on every hover, so `sameEntityNode`
-  failed for all 120 boxes and each redrew every row), and `isDimmed` is gone from node
-  data in favour of one `data-tracing` flag on the canvas with the dimming done in CSS.
-- **The click itself is cheap.** With the pointer already resting on the box, selecting it
-  costs **25 ms** and **5 EntityNode / 40 AttributeRow renders**. Instrumented in Chrome at
-  120 entities and All fields. There is nothing left to memoise on that path.
-- **What is left is the two together.** `perf.spec.ts` samples a click the way `coldClick`
-  does and the way a person does — move onto the box and press with no dwell — so the hover
-  render and the selection render serialise, and the probe waits for both. Median 99–108 ms.
-  Neither half is over budget; the pair is.
-- **Selection must NOT reuse node objects, and that is settled.** React Flow keeps its own
-  `selected` on the internal node and re-reads ours only when the object reference differs.
-  Reusing them left a shift-clicked pair showing one highlight while the store held two.
-  `Canvas` rebuilds every node on a render where the selection moved, deliberately, and
-  says so. Do not "optimise" that away — there is an e2e spec, and it is the one that
-  caught it.
+- **The gap between the pointer landing on a box and the button going down is 172 ms**, in
+  the exact gesture `coldClick` and `perf.spec.ts` send. Measured from the trusted events'
+  own `timeStamp`s. An animation frame is ~16 ms and `--erd-trace-duration` is 120 ms, so by
+  the time the press lands the hover has rendered AND its transition has finished. The two
+  passes do not overlap and nothing about the ordering can be exploited.
+- **So "the hover and the selection serialise" was never true**, and the fix that followed
+  from it could not fire. It was implemented in full (`deferredHover.ts`, a wired-up
+  scheduler, 8 passing unit tests) and reverted, because a mutation check exposed it: the
+  e2e guard still passed with the scheduler's behaviour inverted, which is what sent someone
+  to measure the gap. **A change nothing can distinguish from its own opposite is not a fix.**
+- **The 99-108 ms is therefore the selection pass alone**, measured from pointerdown, not a
+  compound gesture. Which makes the real question sharper, and it is still open:
 
-**What it needs.** A decision about the gesture rather than more memoisation, and probably
-a measurement first: how much of the 100 ms is the hover work that a click makes redundant?
-A click on a box does not need the trace treatment to be computed and painted before the
-selection is — the pointer is going to stop there. Candidates worth measuring: defer the
-hover trace by a frame so a press that arrives immediately supersedes it; or skip the trace
-render entirely when a pointerdown is already in flight. Both change when the trace appears,
-which is a visible change and wants agreeing before it is built.
+**The open question.** Selecting a box costs **25 ms** when the probe settles the main
+thread AFTER moving the pointer onto it, and **99-108 ms** when it settles BEFORE the move
+and then presses 172 ms later. Same click, same box, same build; the only difference is
+where the idle wait sits relative to the move. Either the 25 ms figure is flattered by
+something the settle absorbs, or something started by the hover is still outstanding 172 ms
+later despite the render and the transition both being finished. **Find out which before
+proposing a fix** — and note that the previous attempt at this failed because it went
+looking for a fix first.
 
-Worth knowing before starting: the p95 of any of these numbers is not stable on this
-machine (Known broken 2), so judge a change on the median over several passes.
+**How to investigate it, given the stopwatch is untrustworthy** (Known broken 2): compare
+the two conditions on a MECHANISM, not on time. Render counts per gesture are deterministic
+and already instrumented once — a click with the pointer at rest costs 5 `EntityNode` and 40
+`AttributeRow` renders at 120 entities. Get the same counts for the cold condition. If they
+match, the extra 75 ms is not React and the answer is in the browser's own work; if they do
+not, the counts say exactly what is re-rendering.
+
+**Not worth trying.** Deferring or suppressing the hover (above). Reusing node objects on a
+selection render — React Flow keeps its own `selected` and reusing breaks shift-click, which
+has an e2e spec. `startTransition` and a reference-stable `edges` array, both measured as
+no-ops on the layout path and both carried by the same stores.
+
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)
 
