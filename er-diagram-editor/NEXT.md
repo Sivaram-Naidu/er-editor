@@ -79,15 +79,15 @@ Both dev and `vite preview` of the production build.
 
 ### Verified in a real browser (Chrome, 10 Sep 2026 — real-schema session)
 
-| Thing                                                | Evidence                                                                                                                                                                            |
-| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pagila, 71 tables of real third-party PostgreSQL DDL | Imports to 72 entities / 36 relationships. **Zero** import warnings, alerts, console errors. **Zero overlapping boxes at L0, L1 and L2.** Layout 354 / 346 / 573 ms.                |
-| NFR-1.4 timing at 120 entities                       | **606 ms (L0), 370 ms (L1), 945 ms (L2)** against a 5 s budget. Consistent with the ~840 ms `test:perf` reports in-process, so the algorithm figure was honest.                     |
-| NFR-1.4's 50 ms main-thread clause                   | **Violated.** A `longtask` observer records blocks of **323 ms (L0), 142 ms (L1), 473 ms (L2)** — 9.5x the limit. ELK is genuinely off-thread; the blocking is ours.                |
-| 120 identical tables, laid out                       | Clean grid, no overlaps, minimap populated, edges routed. Screenshot looked at — and this is exactly why the synthetic fixture proves nothing.                                      |
-| 41 tables with realistic names                       | Every rendered box taller than `measure.ts` predicted, worst by **586 px (86%)**; **26 overlapping pairs**, worst 300x530 px.                                                       |
-| Hub-and-spoke at L2                                  | 40 tables onto one hub renders as a single vertical ribbon, ~1,000 px wide by ~40,000 px tall. Screenshot looked at: unreadable at any zoom.                                        |
-| The `.erd.json` fixtures                             | `reference.erd.json` / `stress.erd.json` / `small.erd.json` are empty **and invalid** — no top-level `id`, so importing one is rejected. Their README claimed 120 and 300 entities. |
+| Thing                                                | Evidence                                                                                                                                                                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pagila, 71 tables of real third-party PostgreSQL DDL | Imports to 72 entities / 36 relationships. **Zero** import warnings, alerts, console errors. **Zero overlapping boxes at L0, L1 and L2.** Layout 354 / 346 / 573 ms.                                                      |
+| NFR-1.4 timing at 120 entities                       | **606 ms (L0), 370 ms (L1), 945 ms (L2)** against a 5 s budget. Consistent with the ~840 ms `test:perf` reports in-process, so the algorithm figure was honest.                                                           |
+| NFR-1.4's 50 ms main-thread clause                   | **Violated.** A `longtask` observer records blocks of **323 ms (L0), 142 ms (L1), 473 ms (L2)**. **Corrected 11 Sep 2026: these are DEV-BUILD figures** — the shipped build blocks for 51/62/96 ms. See the 11 Sep table. |
+| 120 identical tables, laid out                       | Clean grid, no overlaps, minimap populated, edges routed. Screenshot looked at — and this is exactly why the synthetic fixture proves nothing.                                                                            |
+| 41 tables with realistic names                       | Every rendered box taller than `measure.ts` predicted, worst by **586 px (86%)**; **26 overlapping pairs**, worst 300x530 px.                                                                                             |
+| Hub-and-spoke at L2                                  | 40 tables onto one hub renders as a single vertical ribbon, ~1,000 px wide by ~40,000 px tall. Screenshot looked at: unreadable at any zoom.                                                                              |
+| The `.erd.json` fixtures                             | `reference.erd.json` / `stress.erd.json` / `small.erd.json` are empty **and invalid** — no top-level `id`, so importing one is rejected. Their README claimed 120 and 300 entities.                                       |
 
 ### Verified in a real browser (Chrome, 11 Sep 2026 — hub layout session)
 
@@ -100,13 +100,33 @@ Both dev and `vite preview` of the production build.
 | 120-entity reference is a wash      | L0 1616x2105 vs 1616x2047 disabled; L2 4945x3090 vs 4945x3205. Marginally squarer at L2, no overlaps either way.                                                         |
 | Layout still fast                   | 344 / 321 / 728 ms at L0 / L1 / L2 on 41 tables. `pnpm test:perf` budgets still pass.                                                                                    |
 
+### Verified in a real browser (Chrome, 11 Sep 2026 — main-thread blocking session)
+
+Production build (`vite preview`) unless stated. Every figure is the **median worst
+`longtask` block over three runs**, measured with the fixture pre-positioned on a grid so
+importing it does NOT auto-arrange and the Auto-layout click genuinely moves every box.
+
+| Thing                                           | Evidence                                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The 323/142/473 ms on record were DEV numbers   | Same harness, same clicks: **dev 303 / 340 / 417 ms**, **production build 51 / 62 / 96 ms** at L0 / L1 / L2 on 120 entities. React's development build dominates its own profile.                      |
+| Where the time actually goes                    | CPU profile of the apply, DEV build: Immer **~15 ms**, validation **~7 ms**, store publish **<1 ms**. The block is React render and commit, not the command. Revalidation was a red herring.           |
+| A move redrew every box's contents              | Render counters inside the page: one layout at 120 entities / L2 cost **120 EntityNode renders and 1,920 AttributeRow renders**. After the fix: **0 and 0**.                                           |
+| Blocks, 120 entities (L0 / L1 / L2)             | **51 / 62 / 96 ms → 0 / 51 / 55 ms.** L0 no longer produces a long task at all; L2 is 43% shorter. The budget is 50 ms, so L1 and L2 still miss it — narrowly.                                         |
+| Blocks, 300 entities (NFR-2.2 ceiling), L2      | **202 ms → 135 ms.** Still 2.7x the budget, which is why the item stays in Tier 1.                                                                                                                     |
+| `startTransition` around the apply does nothing | Measured rather than assumed: 57 ms at 120 and 128 ms at 300, i.e. unchanged. `useSyncExternalStore` de-opts a transition to synchronous rendering, and both stores use it. **Do not redo this.**      |
+| A reference-stable `edges` array does nothing   | Also measured: 56 ms at 120 and 139 ms at 300, unchanged. Rebuilding the edge array is not the cost. **Do not redo this either.**                                                                      |
+| Nothing regressed                               | Screenshots looked at: 120 boxes laid out, minimap populated, edges routed. Hover traces 3 boxes and dims 15, with the connectors highlighted. Inline rename redraws the box. **Zero console errors.** |
+| The gate                                        | `pnpm verify` green, all 16 e2e specs included.                                                                                                                                                        |
+
 ### Known broken
 
-1. **NFR-1.4's "never blocks the main thread for more than 50 ms" is violated**, by up to
-   473 ms, even though ELK now genuinely runs in a worker. The block is on our side of the
-   boundary: applying 120 positions is one Immer pass plus patch derivation plus a store
-   publish plus revalidation, and then React commits 120 nodes and 150 edges at once.
-   Tier 1 item 1.
+1. **NFR-1.4's "never blocks the main thread for more than 50 ms" is still violated** —
+   but by 1 ms at L1 and 5 ms at L2 on 120 entities, and by 85 ms at the 300-entity
+   ceiling. Not by 473 ms: that was a dev-build measurement, corrected on 11 Sep 2026.
+   The production build now blocks for **0 / 51 / 55 ms** at L0 / L1 / L2 on 120 entities
+   and **135 ms** at 300. What is left is React Flow adopting N new node objects and the
+   browser laying out N moved boxes, neither of which memoisation can remove. Tier 1
+   item 1, which now needs a decision rather than more profiling.
 2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
@@ -152,12 +172,12 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 708 unit tests in 30 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+- 711 unit tests in 31 files, ~58s. Coverage 92.2% statements / 83.2% branches / 93.5%
   lines against an 80% gate.
 - **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
-- Bundle 718 kB raw, 222 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
+- Bundle 719 kB raw, 225 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
   inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
   only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
@@ -177,7 +197,8 @@ protecting:
   Chrome, a real 71-table dump imports with no overlaps at all, and the two shapes that
   broke it — realistic column names, and one hub with 40 dependents — are both fixed with
   browser evidence above. What is still unproven is that it stays RESPONSIVE while doing
-  it: NFR-1.4's 50 ms main-thread clause is violated by up to 473 ms (Tier 1 item 1).
+  it: NFR-1.4's 50 ms main-thread clause is still missed — by 5 ms at 120 entities and
+  85 ms at 300, measured on the production build (Tier 1 item 1).
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
 - **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
@@ -259,21 +280,56 @@ in Chrome, a real dump imports with no overlaps at all, and the ~840 ms the perf
 reports in-process was an honest number. The tool is not slow. It is wrong about the size of
 its own boxes, and indifferent to the shape of the graph.
 
-### 1. Stop the main thread blocking for 473 ms when a layout lands
+### 1. The last 5 ms of NFR-1.4 — needs a decision, not more profiling
 
-NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". Measured in
-Chrome on the 120-entity reference schema: blocks of **323 ms at L0, 142 ms at L1 and 473 ms
-at L2**. ELK is genuinely in a worker now, so none of this is the algorithm — it is
-everything that happens when the result comes back:
+NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". **Partly done on
+11 Sep 2026.** Profiled, measured, and roughly halved; what is left needs an approach
+agreed before anyone builds it. Evidence is in the 11 Sep browser table above.
 
-- `applyLayout` is one command over 120 positions: an Immer pass, patch derivation for the
-  undo inverse, a store publish, then revalidation of the whole diagram.
-- React then commits 120 nodes and 150 edges in a single render.
+**Already established — do not redo this.**
 
-Both are plausibly the whole 473 ms and neither has been profiled — do that before choosing
-between them. The obvious levers are chunking the commit, `startTransition` around the
-apply, or keeping revalidation off the layout path. Note that NFR-1.3's 100 ms interaction
-budget has never been measured in a browser either, and probably fails on the same path.
+- **The 323/142/473 ms on record were dev-build numbers.** The same harness against the
+  production build gives **51 / 62 / 96 ms** at L0 / L1 / L2 on 120 entities. React's
+  development build is most of what was being measured. The SRS row has been corrected.
+- **The command is not the cost.** In the dev CPU profile of the apply, Immer is ~15 ms,
+  the whole validation pass ~7 ms and the store publish under 1 ms, against a 417 ms block.
+  Chunking `applyLayout` or keeping revalidation off the layout path would buy nothing.
+  That rules out one of the three levers the earlier version of this item listed.
+- **What HAS been fixed:** a position-only change was re-rendering every box's entire
+  contents. React Flow passes a node's position to the node component as
+  `positionAbsoluteX` / `positionAbsoluteY` props, so the default `memo` comparison breaks
+  on every move — and `Canvas` separately handed every node a freshly built
+  `tracedAttributeIds` Set and `foreignKeyTargets` Map, because both were rebuilt inside the
+  node memo keyed on the whole `Diagram`. One layout at 120 entities and L2 cost 120
+  `EntityNode` renders and **1,920 `AttributeRow` renders**; it now costs **zero of each**.
+  Blocks went 51 / 62 / 96 → **0 / 51 / 55 ms** at 120 entities, and **202 → 135 ms** at the
+  300-entity ceiling. `tests/unit/render/redraw.test.tsx` is the guard.
+- **Two levers tried and measured as no-ops. Do not try them again.**
+  `startTransition` around the apply changes nothing, because both stores are read through
+  `useSyncExternalStore` and React de-opts a transition containing one to synchronous
+  rendering. Making the `edges` array reference-stable across a move also changes nothing.
+
+**What is left, and the decision it needs.** The residue is not ours to memoise away. At
+300 entities the production profile shows React Flow's own `StoreUpdater` effect spending
+64 ms adopting the new node objects, ~230 ms of React render and commit across the window,
+and ~405 ms of browser-internal style and layout for 300 moved boxes. Getting a single task
+under 50 ms from there means **not applying the whole layout in one go** — spreading the
+positions over several frames.
+
+That is a product decision as much as a technical one, so it wants agreeing first:
+
+- The user would see the diagram rearrange in waves rather than snap into place. That may
+  read as better (an animated relayout) or as slower. It is a visible change either way.
+- Auto-layout must remain ONE undo step (FR-3.4), so the command still has to be applied
+  once. Only what reaches the canvas can be staged, which means holding positions outside
+  the document for the duration — the same two-tier shape a drag already has in `trace.ts`,
+  and fighting controlled mode for longer.
+- The alternative is to accept 55 ms and rewrite the NFR, on the grounds that one 55 ms
+  task at the end of a deliberate, one-per-session action is not what the clause is
+  protecting. The clause protects interaction; NFR-1.3 already covers that separately.
+
+Note NFR-1.3's 100 ms interaction budget has still never been measured in a browser, and
+the same path carries it.
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)
 
@@ -336,6 +392,16 @@ In order:
 ---
 
 ## Housekeeping worth doing while nearby
+
+- **There are TWO git repositories here, and the inner one is stale.** The real repo is at
+  `Er_tool/` (branch `fix/auto-layout-worker`, current history); `er-diagram-editor/` also
+  has its own `.git`, stuck at a single commit "ER diagram editor: V1 through Stage 11".
+  A `git` command run from inside `er-diagram-editor/` therefore talks to the STALE repo:
+  `git status` reports almost every file as modified, and — the part that actually bites —
+  `git checkout -- <file>` silently reverts the file to months-old content. It did exactly
+  that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25 lines including the whole
+  `UseAutoLayoutRequest` fix. Run git from `Er_tool/`, or use `git -C`. The inner `.git`
+  wants deleting, but that is not a change to make in passing.
 
 - **The three `.erd.json` fixtures are empty and invalid, and want deleting or
   populating.** `tests/fixtures/README.md` described `reference.erd.json` as 120 entities

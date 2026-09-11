@@ -122,6 +122,9 @@ export interface CanvasProps {
 
 const NO_SEVERITIES: ReadonlyMap<string, Severity> = new Map()
 
+/** Shared for the same reason as `NOTHING_TRACED` in trace.ts — see the note there. */
+const NO_TRACED_ATTRIBUTES: ReadonlySet<AttributeId> = new Set()
+
 function CanvasInner(props: CanvasProps): React.ReactElement {
   const { diagram, lod, hoveredEntityId, hoveredRelationshipId } = props
   const { onMoveEntities } = props
@@ -161,26 +164,45 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
 
   const isTracing = traced.entities.size > 0 || traced.relationships.size > 0
 
-  const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
-    // Which attribute rows sit on the traced path, so an FK row can be picked out rather
-    // than the whole box (FR-4.5).
-    const tracedAttributeIds = new Set<AttributeId>()
-    if (isTracing) {
-      for (const entity of diagram.entities) {
-        for (const attribute of entity.attributes) {
-          const fk = attribute.foreignKey
-          if (fk !== undefined && traced.entities.has(fk.entityId)) {
-            tracedAttributeIds.add(attribute.id)
-          }
-        }
+  /**
+   * Which attribute rows sit on the traced path, so an FK row can be picked out rather
+   * than the whole box (FR-4.5).
+   *
+   * Memoised on `diagram.entities` rather than on `diagram`, and that is the whole
+   * point of it being up here instead of inside `baseNodes`. Moving a box produces a new
+   * `Diagram` but the SAME `entities` array — Immer only copies the path it mutated, and
+   * `applyLayout` touches `layout.positions` — so keying on entities keeps this Set
+   * reference-stable across a layout. `EntityNode`'s comparison reads that stability as
+   * "nothing in here changed" and skips re-rendering the box's rows.
+   */
+  const tracedAttributeIds = useMemo(() => {
+    if (!isTracing) return NO_TRACED_ATTRIBUTES
+
+    const ids = new Set<AttributeId>()
+    for (const entity of diagram.entities) {
+      for (const attribute of entity.attributes) {
+        const fk = attribute.foreignKey
+        if (fk !== undefined && traced.entities.has(fk.entityId)) ids.add(attribute.id)
       }
     }
+    return ids
+  }, [diagram.entities, isTracing, traced])
 
-    // "CUSTOMER.id" for every foreign key, resolved once per diagram change. An FK badge
-    // that only says "FK" is a marker rather than information — the question in a large
-    // schema is always "referencing what?".
-    const foreignKeyTargets = new Map<AttributeId, string>()
-    const { entityById } = indexOf(diagram)
+  /**
+   * "CUSTOMER.id" for every foreign key. An FK badge that only says "FK" is a marker
+   * rather than information — the question in a large schema is always "referencing
+   * what?".
+   *
+   * Keyed on `diagram.entities` for the same reason as above: this is derived from
+   * entities alone, so rebuilding it when a position changes would hand every node a new
+   * Map and re-render every row for a move. That is also why the entity lookup is built
+   * here rather than taken from `indexOf(diagram)` — that index is cached on the Diagram
+   * OBJECT, so a position change misses the cache and rebuilds all four of its maps.
+   */
+  const foreignKeyTargets = useMemo(() => {
+    const targets = new Map<AttributeId, string>()
+    const entityById = new Map(diagram.entities.map((entity) => [entity.id, entity]))
+
     for (const entity of diagram.entities) {
       for (const attribute of entity.attributes) {
         const fk = attribute.foreignKey
@@ -188,14 +210,14 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         const target = entityById.get(fk.entityId)
         const column = target?.attributes.find((candidate) => candidate.id === fk.attributeId)
         if (target !== undefined && column !== undefined) {
-          foreignKeyTargets.set(
-            attribute.id,
-            `${target.name || 'unnamed'}.${column.name || 'unnamed'}`,
-          )
+          targets.set(attribute.id, `${target.name || 'unnamed'}.${column.name || 'unnamed'}`)
         }
       }
     }
+    return targets
+  }, [diagram.entities])
 
+  const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
     return diagram.entities.map((entity, index) => ({
       id: entity.id,
       type: 'entity',
@@ -218,6 +240,8 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     lod,
     traced,
     isTracing,
+    tracedAttributeIds,
+    foreignKeyTargets,
     props.selectedEntityIds,
     props.selectedAttributeId,
     props.editable,

@@ -39,7 +39,16 @@ export interface TraceSets {
  *
  * Returning empty sets when nothing is hovered is load-bearing: `isDimmed` is then false
  * everywhere, so the diagram renders at full strength rather than uniformly faded.
+ *
+ * That answer is a SHARED constant rather than a fresh pair of Sets, and the identity is
+ * load-bearing too. Canvas memoises this on the whole `Diagram`, which is a new object
+ * after any edit including a pure move, so a fresh empty pair would travel into every
+ * node's `data` and defeat the comparison in `sameEntityNode` — re-rendering all 120
+ * boxes and their rows whenever a layout lands. Nothing hovered is always the same
+ * nothing.
  */
+const NOTHING_TRACED: TraceSets = { entities: new Set(), relationships: new Set() }
+
 export function traceSets(
   diagram: Diagram,
   hoveredEntityId: EntityId | undefined,
@@ -62,7 +71,7 @@ export function traceSets(
     return { entities: neighbourhood.entityIds, relationships: neighbourhood.relationshipIds }
   }
 
-  return { entities: new Set(), relationships: new Set() }
+  return NOTHING_TRACED
 }
 
 export function fallbackPosition(index: number): Point {

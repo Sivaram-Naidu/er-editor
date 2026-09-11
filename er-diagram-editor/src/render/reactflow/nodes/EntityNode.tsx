@@ -9,6 +9,7 @@ import { useEditorActions } from '../EditorActions'
 
 import { AttributeRow } from './AttributeRow'
 import { InlineName } from './InlineName'
+import { sameEntityNode } from './sameEntityNode'
 
 /** What Canvas puts in `node.data`. */
 export interface EntityNodeData extends Record<string, unknown> {
@@ -162,7 +163,5 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
   )
 }
 
-// Memoised on `data` identity. Canvas rebuilds node data only when the diagram, the LOD
-// or the traced set changes, so panning and zooming within a level re-render nothing.
-export const EntityNode = memo(EntityNodeComponent)
+export const EntityNode = memo(EntityNodeComponent, sameEntityNode)
 EntityNode.displayName = 'EntityNode'

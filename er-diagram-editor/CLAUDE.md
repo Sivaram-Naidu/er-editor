@@ -27,6 +27,11 @@ pnpm test:e2e      # 16 specs on the system Chrome, ~40s. No browser install nee
 `pnpm verify` must pass. Do not weaken a lint rule, a type, or a coverage threshold to
 make it pass — those have caught real bugs repeatedly (see "Things that have gone wrong").
 
+**Run git from the repository root, one level up.** There is a second, stale `.git` inside
+`er-diagram-editor/`, frozen at a single old commit. Git commands run from this directory
+talk to that one: `git status` claims almost everything is modified, and `git checkout --
+<file>` silently reverts a file to months-old content. `cd ..` first, or use `git -C`.
+
 ## Architecture, and the rule that enforces it
 
 ```
@@ -233,6 +238,30 @@ culling off.
   rather than by calibration — while a name could wrap, no fixed per-character width could
   predict the height, because where a name breaks depends on its glyphs (measured 6.2 to
   10.2 px per character on real column names) rather than on its length.
+- **React Flow passes a node's POSITION to the node component as a prop.** `NodeWrapper`
+  renders `<NodeComponent … positionAbsoluteX positionAbsoluteY …>`, so `memo(EntityNode)`
+  with the default comparison re-renders the whole box — header, every attribute row, every
+  badge, every per-row handle — whenever the box moves, even though the wrapper above it is
+  what applies the CSS transform. Free while one box is dragged; ruinous when a layout
+  lands and all of them move at once: 120 `EntityNode` and **1,920 `AttributeRow`** renders
+  for the 120-entity reference schema. `sameEntityNode` declines those two props and
+  compares everything else. For it to hold, `Canvas` must also keep the Set and the Map
+  inside `node.data` reference-stable across a move — both are memoised on
+  `diagram.entities`, not on `diagram`, because Immer's structural sharing means a
+  position-only command hands back the SAME entities array. `traceSets` returns a shared
+  `NOTHING_TRACED` for the same reason. The defect is invisible from either side: the
+  diagram renders identically, only the cost differs, so the test is on the pair
+  (`tests/unit/render/redraw.test.tsx`).
+- **`startTransition` cannot break up an update that comes from a Zustand store.** React
+  de-opts a transition containing a `useSyncExternalStore` read to synchronous rendering, to
+  avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
+  nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
+  store here is Zustand, so this applies to all of them.
+- **Measure performance against the production build, not `pnpm dev`.** NFR-1.4's
+  main-thread numbers sat in the SRS for a day as 323/142/473 ms; the same clicks against
+  `vite preview` gave 51/62/96 ms. React's development build — `jsxDEV`, prop validation,
+  StrictMode's double render — was most of what was being measured. Use `vite preview`, and
+  take the median of at least three runs: single runs on this canvas vary by ±20 ms.
 - **Three separate ways to ship a broken image export.** All three produced a file, none
   threw, and all three passed every check a unit test can make. See `docs/SRS.md` §13.1.
   - `useStore(s => s.nodesInitialized)` is a **stale flag**. React Flow recomputes it only
