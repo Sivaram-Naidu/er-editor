@@ -341,8 +341,18 @@
  * path thickens, takes the one saturated colour in the palette, and lifts.
  */
 
-.erd-node[data-dimmed],
-.erd-edge[data-dimmed] {
+/* Dimming is scoped to the canvas, not stamped onto each element.
+ *
+ * `[data-dimmed]` used to be written per node and per edge from React, which meant
+ * starting a hover changed state on all N-1 elements that are NOT on the traced path — an
+ * O(N) rebuild to express one fact about the diagram. `data-tracing` on the container says
+ * it once. Measured consequence at 120 entities: hover p95 went from 83-195 ms to the
+ * figures in NEXT.md, against NFR-1.3's 100 ms budget.
+ *
+ * `:not([data-traced])` is doing the same job the old boolean did, and reads the same way:
+ * while something is traced, anything that is not traced recedes. */
+.erd-canvas[data-tracing] .erd-node:not([data-traced]),
+.erd-canvas[data-tracing] .erd-edge:not([data-traced]) {
   opacity: var(--erd-dim-opacity);
 }
 
@@ -354,7 +364,7 @@
 
 /* Dimmed elements sit behind traced ones, so a traced connector crossing a dimmed box
    stays readable rather than disappearing under it. */
-.react-flow__node:has(.erd-node[data-dimmed]) {
+.erd-canvas[data-tracing] .react-flow__node:not(:has(.erd-node[data-traced])) {
   z-index: 0 !important;
 }
 
@@ -375,11 +385,18 @@
 
 /* A dimmed connector keeps more presence than a dimmed box: lines are thin to begin
    with, so the same opacity erases them faster. */
-.erd-edge[data-dimmed] {
+.erd-canvas[data-tracing] .erd-edge:not([data-traced]) {
   opacity: calc(var(--erd-dim-opacity) + 0.15);
 }
 
-.erd-edge[data-traced] .erd-edge__label {
+/* A dimmed connector also drops its label, which used to be done by not rendering it.
+   Hiding it here instead means an untraced edge keeps the same `data` object while
+   something else is traced, which is the whole point of the change above. */
+.erd-canvas[data-tracing] .erd-edge__label:not([data-traced]) {
+  display: none;
+}
+
+.erd-edge__label[data-traced] {
   color: var(--erd-ink);
   background: var(--erd-signal-wash);
 }

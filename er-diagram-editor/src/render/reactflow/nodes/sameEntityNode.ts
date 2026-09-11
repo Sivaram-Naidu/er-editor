@@ -21,13 +21,20 @@ import type { EntityNodeData } from './EntityNode'
  * reference here IS the statement that their contents are unchanged. Comparing their
  * contents instead would walk every attribute of every entity on every render, which is
  * the cost this comparison exists to avoid.
+ *
+ * That makes the reference discipline in Canvas load-bearing, and it was broken for
+ * `tracedAttributeIds` until 11 Sep 2026: it was ONE Set for the whole diagram, so every
+ * hover minted a new one, this comparison returned false for all 120 boxes, and each of
+ * them redrew every row. It is now one set per entity, absent for entities with nothing
+ * traced, so the shared empty Set keeps its identity and the comparison holds. If a field
+ * is added here, memoise it on what it is actually derived from or this comparison is
+ * decoration.
  */
 function sameEntityNodeData(previous: EntityNodeData, next: EntityNodeData): boolean {
   return (
     previous.entity === next.entity &&
     previous.lod === next.lod &&
     previous.isTraced === next.isTraced &&
-    previous.isDimmed === next.isDimmed &&
     previous.tracedAttributeIds === next.tracedAttributeIds &&
     previous.selectedAttributeId === next.selectedAttributeId &&
     previous.foreignKeyTargets === next.foreignKeyTargets &&

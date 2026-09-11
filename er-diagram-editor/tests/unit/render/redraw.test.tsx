@@ -88,14 +88,28 @@ function afterAutoLayout(diagram: Diagram): Diagram {
   return new CommandStack(diagram).execute(applyLayout(positions))
 }
 
-function canvas(diagram: Diagram): React.ReactElement {
+interface CanvasState {
+  hoveredEntityId?: EntityId
+  selectedEntityIds?: ReadonlySet<EntityId>
+}
+
+/**
+ * One empty Set for every render that selects nothing.
+ *
+ * A fresh `new Set()` per call would give `baseNodes` a new dependency every time and
+ * rebuild all the nodes, which is the very thing the assertions below are about — the test
+ * would fail for a reason that has nothing to do with the component.
+ */
+const NOTHING_SELECTED: ReadonlySet<EntityId> = new Set()
+
+function canvas(diagram: Diagram, state: CanvasState = {}): React.ReactElement {
   return (
     <Canvas
       diagram={diagram}
       lod={2}
-      hoveredEntityId={undefined}
+      hoveredEntityId={state.hoveredEntityId}
       hoveredRelationshipId={undefined}
-      selectedEntityIds={new Set()}
+      selectedEntityIds={state.selectedEntityIds ?? NOTHING_SELECTED}
       selectedRelationshipIds={new Set()}
       selectedAttributeId={undefined}
       editable
@@ -161,4 +175,79 @@ describe('landing a layout does not redraw the boxes (NFR-1.4)', () => {
 
     expect(verdicts).toContain(false)
   })
+})
+
+describe('hovering and selecting do not redraw the other boxes (NFR-1.3)', () => {
+  /*
+   * THE SAME SHAPE OF DEFECT AS THE LAYOUT ONE ABOVE, AND IT SURVIVED THAT FIX.
+   *
+   * Hovering a box traces it and its neighbours and pushes everything else back; clicking
+   * one selects it. Neither changes anything about the boxes that are not involved — but
+   * both used to rebuild all of them anyway, for two separate reasons:
+   *
+   *   `tracedAttributeIds` was ONE Set for the whole diagram, so a hover minted a new one
+   *   and every node's data carried a new reference. `sameEntityNode` compares it by
+   *   reference, deliberately, so every box answered "changed" and redrew every row.
+   *
+   *   `isDimmed` was a per-node boolean, so starting a hover flipped it on all N-1 boxes
+   *   that are NOT traced — an O(N) state change to express one fact about the diagram.
+   *
+   * Measured in Chrome on the production build at 120 entities before the fix: hover p95
+   * 83-195 ms and selection p95 147-162 ms, against NFR-1.3's 100 ms budget. As with the
+   * layout case, the diagram renders identically either way and only the cost differs,
+   * which is exactly why the assertion has to be on the comparator's verdicts rather than
+   * on what is on screen.
+   */
+  beforeEach(() => {
+    verdicts.length = 0
+  })
+
+  it('says the untraced boxes are unchanged when a hover starts', () => {
+    const diagram = schema()
+    const [first] = diagram.entities
+    const { rerender } = render(canvas(diagram))
+
+    verdicts.length = 0
+    rerender(canvas(diagram, { hoveredEntityId: first!.id }))
+
+    // The hovered box and its one-hop neighbour genuinely change — they gain
+    // `data-traced` — so this counts the FALSE verdicts rather than demanding none.
+    // The third box is untouched by the hover and must say so.
+    expect(verdicts.length).toBeGreaterThanOrEqual(3)
+    expect(verdicts.filter((verdict) => !verdict).length).toBeLessThanOrEqual(2)
+    expect(verdicts).toContain(true)
+  })
+
+  it('says every box is unchanged when the hover ends', () => {
+    const diagram = schema()
+    const [first] = diagram.entities
+    const { rerender } = render(canvas(diagram, { hoveredEntityId: first!.id }))
+
+    verdicts.length = 0
+    rerender(canvas(diagram))
+
+    expect(verdicts.filter((verdict) => !verdict).length).toBeLessThanOrEqual(2)
+  })
+
+  it('says the boxes that were not selected are unchanged', () => {
+    const diagram = schema()
+    const [, second] = diagram.entities
+    const { rerender } = render(canvas(diagram))
+
+    verdicts.length = 0
+    rerender(canvas(diagram, { selectedEntityIds: new Set([second!.id]) }))
+
+    // Only the newly selected box changed, so only it redraws its contents.
+    //
+    // Note what this does NOT say. Canvas deliberately hands React Flow a brand new object
+    // for every node on a render where the selection moved, even for the boxes this
+    // comparator calls unchanged — because React Flow keeps its own private `selected` on
+    // the internal node and only re-reads ours when the object reference differs. Reusing
+    // objects here left a shift-clicked pair showing one highlight while the store held
+    // two. The comparator and the object identity are two separate decisions; this asserts
+    // the first, and tests/e2e/interaction.spec.ts asserts the second.
+    expect(verdicts.length).toBeGreaterThanOrEqual(3)
+    expect(verdicts.filter((verdict) => !verdict).length).toBeLessThanOrEqual(1)
+  })
+
 })

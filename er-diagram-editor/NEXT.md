@@ -133,23 +133,43 @@ every measurement. `pnpm test:perf:browser` reproduces every row.
 | The dev-build trap cannot recur              | `perf.spec.ts` asserts no `/@vite/client` and an `/assets/` entry chunk before it measures anything, and `playwright.config.ts` refuses to run the file at all.                                                              |
 | Nothing regressed                            | `pnpm verify` green. Zero `role="alert"` after every layout.                                                                                                                                                                |
 
+### Verified in a real browser (Chrome, 11 Sep 2026 — node-rebuild session)
+
+Production build, 120 entities, all boxes framed, Detail pinned to All fields, 25 samples
+per gesture. **Medians, because the p95 is not stable on this machine** — the tail tracks
+background load and moved between 56 and 170 ms across five passes with no code change,
+while the median moved by 10 ms. `pnpm test:perf:browser` reproduces it.
+
+| Thing                                        | Evidence                                                                                                                                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover, the number the item was promoted for  | Median **59 / 90 / 99 ms → 43 / 46 / 48 / 50 / 53 ms** over three passes before and five after. Roughly halved and consistent.                                                        |
+| What actually cost that                      | `tracedAttributeIds` was ONE Set for the whole diagram, so a hover minted a new one, `sameEntityNode` compared it by reference, and all 120 boxes redrew every row. Now one set per entity. |
+| Dimming stopped being an O(N) state change   | `isDimmed` was a per-node boolean, so starting a hover rebuilt all N-1 untraced nodes to say so. Now one `data-tracing` flag on the canvas and a `:not([data-traced])` rule in CSS.    |
+| A click, with the pointer already on the box | **25 ms median**, and **5 EntityNode / 40 AttributeRow renders** per selection at 120 entities. The click itself is not the problem and never was.                                    |
+| A COLD click is still ~100 ms                | Median **99–108 ms** at All fields, unchanged by this work. Move-then-press with no dwell makes the hover render and the selection render run back to back. New item 1 below.         |
+| Selection deliberately does NOT reuse nodes  | React Flow keeps its own `selected` on the internal node and re-reads ours only when the object reference differs. Reusing left a shift-clicked pair showing one highlight while the store held two. |
+| Nothing regressed                            | `pnpm verify` green, 16 e2e specs, 720 unit tests. The shift-click regression above was caught by the e2e suite, not by review.                                                       |
+
 ### Known broken
 
-1. **NFR-1.3 is missed when Detail is pinned to All fields.** Selection p95
-   **147–162 ms** against a 100 ms budget, on every run; hover **83–195 ms**. At the detail
-   level the tool actually uses at 120 tables (Follow zoom, so L0) it is met, at 49–57 ms
-   for hover and 68–82 ms for selection. Measured in Chrome on the production build,
-   11 Sep 2026 — the first time this requirement had ever been checked outside jsdom. Cause
-   and plan in Tier 1 item 1. **NFR-1.4's clause is no longer on this list**: it was
-   narrowed on 11 Sep 2026 to exclude the single task that applies a layout, which is what
-   it was always protecting against interference with. See the SRS row for the reasoning.
-2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+1. **NFR-1.3 is still missed for a COLD CLICK when Detail is pinned to All fields.**
+   Median **99–108 ms** against a 100 ms budget. Hover is fixed — median 43–53 ms, down
+   from 59–99 — and a click with the pointer already resting on the box costs **25 ms**, so
+   what is left is the two arriving together. Tier 1 item 1. At the detail level the tool
+   actually uses at 120 tables (Follow zoom, so L0) everything is inside budget.
+   **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
+   single task that applies a layout, which is what it was always protecting against
+   interference with. See the SRS row.
+2. **The p95 of any interaction measurement is not trustworthy on this machine.** Five
+   passes with no code change put hover's p95 anywhere between 56 and 170 ms while the
+   median moved by 10 ms. Read the medians; `perf.spec.ts` asserts on them for this reason.
+3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
-3. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+4. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-4. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+5. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
    overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
@@ -188,7 +208,7 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 711 unit tests in 31 files, ~58s. Coverage 92.2% statements / 83.2% branches / 93.5%
+- 720 unit tests in 31 files, ~58s. Coverage 92.2% statements / 83.7% branches / 93.6%
   lines against an 80% gate.
 - **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
@@ -308,44 +328,44 @@ with no overlaps at all, and the ~840 ms the perf suite reports in-process was a
 number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
 identified reason.
 
-### 1. Stop rebuilding every node object on hover and on selection
+### 1. A cold click costs a hover and a selection, back to back
 
-**Promoted from Tier 3 on 11 Sep 2026, because it stopped being speculative.** The old
-Tier 3 entry ended "Measure first: at four entities it is free, and the cost has never been
-measured at scale." It has been measured at scale, in Chrome, on the production build, and
-it is what makes NFR-1.3 fail.
+**Rewritten 11 Sep 2026.** This slot used to say "stop rebuilding every node object on
+hover and on selection". That work is done and measured — see the browser table above — and
+it fixed hover. It did not fix the number the item was promoted for, and the reason is now
+known rather than suspected.
 
 **Already established — do not redo this.**
 
-- **The numbers**, 120 entities, all boxes framed, 25 samples per gesture, three runs,
-  `pnpm test:perf:browser`. With Detail on **Follow zoom** (so L0, which is what the tool
-  actually shows at this size): hover p95 **49 / 56 / 57 ms**, selection **68 / 74 / 82 ms**,
-  keystroke **13 ms** — all inside NFR-1.3's 100 ms. With Detail pinned to **All fields**:
-  selection p95 **147 / 161 / 162 ms**, missing on every run, and hover **83 / 91 / 195 ms**.
-  Keystrokes are never the problem, at 13–16 ms in every state.
-- **The cause is the one already written down**, and the measurement did not change it:
-  `Canvas` takes `hoveredEntityId` and the selection as props and rebuilds all N node
-  objects through the `baseNodes` memo, walking every attribute of every entity, on every
-  hover and every click. CLAUDE.md's split-store note already promises this does not happen
-  ("hover is separated _so that_ it does not re-render every table"); `Canvas` does not
-  honour it.
-- **Selection is worse than hover, and that is new.** The old entry was about hover only.
-  Whatever is done for hover has to cover the selection path too, or the worse of the two
-  numbers survives.
-- **The move is unchanged:** have `EntityNode` subscribe to trace and selection state by
-  its own id instead of receiving them in `node.data`. `sameEntityNode` and
-  `tests/unit/render/redraw.test.tsx` are the existing shape for asserting that N boxes did
-  NOT re-render; extend them rather than starting a new pattern.
-- **What NOT to reach for.** `startTransition` around a store-driven update does nothing —
-  React de-opts a transition containing a `useSyncExternalStore` read to synchronous
-  rendering, measured and confirmed. A reference-stable `edges` array does nothing either.
-  Both were measured on the layout path in the session below; the same two stores carry
-  hover, so the same conclusion holds.
+- **Hover is fixed.** Median at 120 entities / All fields went from 59–99 ms to 43–53 ms.
+  Two changes did it: `tracedAttributeIds` is now one set PER ENTITY rather than one for
+  the diagram (a shared Set minted a new identity on every hover, so `sameEntityNode`
+  failed for all 120 boxes and each redrew every row), and `isDimmed` is gone from node
+  data in favour of one `data-tracing` flag on the canvas with the dimming done in CSS.
+- **The click itself is cheap.** With the pointer already resting on the box, selecting it
+  costs **25 ms** and **5 EntityNode / 40 AttributeRow renders**. Instrumented in Chrome at
+  120 entities and All fields. There is nothing left to memoise on that path.
+- **What is left is the two together.** `perf.spec.ts` samples a click the way `coldClick`
+  does and the way a person does — move onto the box and press with no dwell — so the hover
+  render and the selection render serialise, and the probe waits for both. Median 99–108 ms.
+  Neither half is over budget; the pair is.
+- **Selection must NOT reuse node objects, and that is settled.** React Flow keeps its own
+  `selected` on the internal node and re-reads ours only when the object reference differs.
+  Reusing them left a shift-clicked pair showing one highlight while the store held two.
+  `Canvas` rebuilds every node on a render where the selection moved, deliberately, and
+  says so. Do not "optimise" that away — there is an e2e spec, and it is the one that
+  caught it.
 
-**How to check it.** `pnpm test:perf:browser` prints all six figures and flags any that miss
-NFR-1.3. The assertions in it are deliberately an order-of-magnitude guard rather than the
-budget, because the budget is currently missed — lower
-`INTERACTION_REGRESSION_CEILING_MS` to 100 and delete its note when this lands.
+**What it needs.** A decision about the gesture rather than more memoisation, and probably
+a measurement first: how much of the 100 ms is the hover work that a click makes redundant?
+A click on a box does not need the trace treatment to be computed and painted before the
+selection is — the pointer is going to stop there. Candidates worth measuring: defer the
+hover trace by a frame so a press that arrives immediately supersedes it; or skip the trace
+render entirely when a pointerdown is already in flight. Both change when the trace appears,
+which is a visible change and wants agreeing before it is built.
+
+Worth knowing before starting: the p95 of any of these numbers is not stable on this
+machine (Known broken 2), so judge a change on the median over several passes.
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)
 

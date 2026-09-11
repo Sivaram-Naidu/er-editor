@@ -15,14 +15,13 @@ export interface RelationshipEdgeData extends Record<string, unknown> {
   sourceName: string
   targetName: string
   isTraced: boolean
-  isDimmed: boolean
   /** Worst validation severity on this relationship (FR-8.4). */
   issueSeverity: Severity | undefined
 }
 
 function RelationshipEdgeComponent(props: EdgeProps): React.ReactElement {
   const data = props.data as unknown as RelationshipEdgeData
-  const { relationship, isTraced, isDimmed, issueSeverity } = data
+  const { relationship, isTraced, issueSeverity } = data
   const [from, to] = relationship.participants
 
   const markerUrl = (end: { cardinality: Cardinality; participation: Participation }): string => {
@@ -43,7 +42,6 @@ function RelationshipEdgeComponent(props: EdgeProps): React.ReactElement {
     <g
       className="erd-edge"
       data-traced={isTraced || undefined}
-      data-dimmed={isDimmed || undefined}
       /* Non-identifying relationships are dashed, matching Mermaid's `..` and the
          standard IE convention (FR-1.9). */
       data-identifying={relationship.isIdentifying || undefined}
@@ -72,10 +70,20 @@ function RelationshipEdgeComponent(props: EdgeProps): React.ReactElement {
           what is drawn (FR-4.1). */}
       <path className="erd-edge__hit" d={path} />
 
-      {relationship.name === '' || isDimmed ? null : (
+      {/* A dimmed connector drops its label in CSS rather than here — see canvas.css.
+          Rendering it unconditionally is what lets an edge keep the same data object
+          while something elsewhere is traced.
+
+          `data-traced` is repeated on the label because `EdgeLabelRenderer` is a PORTAL:
+          the div is mounted into React Flow's own label layer, not inside the <g> above,
+          so no selector descending from `.erd-edge` can reach it. That is not a new
+          constraint — it is why `.erd-edge[data-traced] .erd-edge__label` had never once
+          applied, and the traced label had been silently unstyled since it was written. */}
+      {relationship.name === '' ? null : (
         <EdgeLabelRenderer>
           <div
             className="erd-edge__label"
+            data-traced={isTraced || undefined}
             style={{
               transform: `translate(-50%, -50%) translate(${String(labelX)}px, ${String(labelY)}px)`,
             }}

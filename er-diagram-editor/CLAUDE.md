@@ -261,6 +261,41 @@ culling off.
   avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
   nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
   store here is Zustand, so this applies to all of them.
+- **A computed-style assertion against a TRANSITIONED property has to be polled.** Opacity
+  on `.erd-node` transitions over `--erd-trace-duration`, so reading `getComputedStyle`
+  straight after the hover lands mid-fade and reports ~1. It failed three runs out of three
+  while a screenshot plainly showed two dimmed boxes. `expect.poll`, not
+  `waitForTimeout` — a sleep passes today and rots when the duration changes.
+- **`EdgeLabelRenderer` is a portal, so no selector descending from the edge can style the
+  label.** It mounts the label into React Flow's own label layer, not inside the edge's
+  `<g>`. `.erd-edge[data-traced] .erd-edge__label` had therefore never applied once since
+  it was written, and a new rule to hide dimmed labels failed the same way — the labels
+  stayed on screen through a hover. Repeat the state on the label element itself. Found by
+  looking at a screenshot; both the unit suite and every DOM count were happy.
+- **React Flow keeps its OWN `selected` on the internal node, and only re-reads yours when
+  the node object's reference changes.** Reusing unchanged node objects across a render is
+  the right fix for hover — `adoptUserNodes` then keeps the internals instead of rebuilding
+  them — but applying it to a render where the SELECTION moved silently breaks controlled
+  selection. Shift is React Flow's marquee key, not its multi-select key, so it treats a
+  shift-click as a plain one and internally deselects everything else; this app treats it
+  as "add to the selection". While every node object was rebuilt every render, our value was
+  re-asserted constantly and the library's private opinion never survived a frame. Reuse
+  silences that, and a shift-clicked pair showed one highlight while the store held two —
+  the model right, only the view stale. `Canvas` therefore rebuilds every node on a
+  selection render on purpose. It cost nothing: a click with the pointer at rest is 25 ms
+  and 5 node renders at 120 entities, so selection was never where the saving was.
+- **One shared Set in `node.data` makes every node's data change whenever it does.**
+  `tracedAttributeIds` was one Set for the whole diagram, and `sameEntityNode` compares it
+  by reference on purpose (comparing contents would walk every attribute of every entity).
+  So a hover minted a new Set, every box answered "changed", and all 120 redrew every row —
+  hover median 90-99 ms against NFR-1.3's 100 ms. It is one set PER ENTITY now, absent for
+  entities with nothing traced so the shared empty Set keeps its identity. Any per-node
+  field derived from a diagram-wide fact has this shape.
+- **A per-element flag that expresses a diagram-wide fact is an O(N) state change.**
+  `isDimmed` was a boolean on every node and edge, so starting a hover rebuilt all N-1
+  elements that are NOT traced in order to say so. `data-tracing` on the canvas plus
+  `.erd-node:not([data-traced])` in CSS says the same thing with one attribute. Ask whether
+  the state belongs to the element or to the diagram.
 - **`longtask` has a 50 ms floor, so a reading of 0 is information and not a gap.** The
   browser emits an entry only for a task that already exceeded the threshold, which is
   exactly what NFR-1.4's clause asks about and is why the observer is the right instrument.

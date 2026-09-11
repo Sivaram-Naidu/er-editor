@@ -43,24 +43,24 @@ const INTERACTION_BUDGET_MS = 100
 /**
  * The regression guard, and deliberately nowhere near the budget above.
  *
- * NFR-1.3 IS CURRENTLY MISSED, and this file is what established that: on the production
- * build at 120 entities, hover p95 runs 138–153 ms and selection p95 180–315 ms, in both
- * detail states. Keystrokes are fine at 14–20 ms. The cause is not a mystery — `Canvas`
- * takes `hoveredEntityId` and the selection as props and rebuilds all N node objects
- * through its `baseNodes` memo on every hover and every click, walking every attribute of
- * every entity. NEXT.md's Tier 3 item 5 asked for exactly this measurement before anyone
- * did the work; it has it now, and the item has been promoted.
+ * ONE GESTURE STILL MISSES NFR-1.3. On the production build at 120 entities with Detail
+ * pinned to All fields, a COLD click — move onto a box and press with no dwell, which is
+ * what this file samples and what a person does — runs a median of 99-108 ms. Hover was
+ * fixed on 11 Sep 2026 (median 59-99 to 43-53 ms) and a click with the pointer already at
+ * rest costs 25 ms, so what is left is the two rendering back to back. NEXT.md Tier 1
+ * item 1 carries the decision that needs making about it.
  *
  * So the assertion cannot be the budget without leaving a permanently red command, and it
- * must not be a snug fit around today's figure either: interaction latency on this machine
- * varies by a factor of two between runs, and a tripwire that flakes gets muted. It is
- * therefore the same kind of guard `tests/perf/layout.perf.test.ts` uses and says so — an
+ * must not be a snug fit around today's figure either: a tripwire that flakes gets muted.
+ * It is the same kind of guard `tests/perf/layout.perf.test.ts` uses and says so — an
  * order-of-magnitude check, not a benchmark. The real signal is the `MISSES NFR-1.3` flag
  * on the reported lines, which is unconditional and does not move.
  *
- * It is applied to the MEDIAN rather than the p95 because the median is what stays still
- * between runs; the p95 is what the requirement is worded against, so that is what gets
- * printed. Lower this to 100 and delete the note when item 5 lands.
+ * It is applied to the MEDIAN, and that is not a dodge. Five passes of this file with no
+ * code change in between put hover's p95 anywhere between 56 and 170 ms while its median
+ * moved by 10 ms — the tail on this machine is background load, not the app. The p95 is
+ * what the requirement is worded against, so it is what gets printed; the median is what
+ * can carry an assertion. Lower this to 100 and delete the note when item 1 lands.
  */
 const INTERACTION_REGRESSION_CEILING_MS = 250
 

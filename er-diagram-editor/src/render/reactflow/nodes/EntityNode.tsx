@@ -18,7 +18,6 @@ export interface EntityNodeData extends Record<string, unknown> {
   /** Emphasised as part of the traced path (FR-4.1, FR-4.2). */
   isTraced: boolean
   /** Something else is traced, so this is pushed back. */
-  isDimmed: boolean
   tracedAttributeIds: ReadonlySet<AttributeId>
   selectedAttributeId: AttributeId | undefined
   /** attributeId -> "CUSTOMER.id". Resolved by the canvas, which holds the diagram. */
@@ -63,7 +62,6 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
     entity,
     lod,
     isTraced,
-    isDimmed,
     tracedAttributeIds,
     selectedAttributeId,
     foreignKeyTargets,
@@ -84,7 +82,6 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
       data-kind={entity.kind}
       data-lod={lod}
       data-traced={isTraced || undefined}
-      data-dimmed={isDimmed || undefined}
       data-issue={marker === undefined ? undefined : issueSeverity}
     >
       {/* Box-level handles. Per-row handles appear at L2, where the rows exist. */}

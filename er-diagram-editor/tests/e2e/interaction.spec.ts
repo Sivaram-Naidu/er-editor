@@ -136,7 +136,50 @@ test('hovering a table traces its neighbourhood and pushes the rest back', async
 
   // CUSTOMER and its one-hop neighbour ORDER.
   await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
-  await expect(page.locator('.erd-node[data-dimmed]')).toHaveCount(2)
+
+  /*
+   * The other two recede, and the assertion is on the RENDERED opacity rather than on a
+   * `data-dimmed` attribute, because there is no longer one to count. Dimming used to be a
+   * per-node boolean, which made starting a hover an O(N) state change — every box that is
+   * NOT traced had to be rebuilt to say so. It is now one `data-tracing` flag on the
+   * canvas and a `:not([data-traced])` rule in CSS.
+   *
+   * Asserting the computed style is the point: an attribute could be renamed or a selector
+   * could stop matching and the diagram would quietly stop dimming, which is a visual
+   * regression no attribute count would catch.
+   */
+  await expect(page.locator('.erd-canvas[data-tracing]')).toHaveCount(1)
+
+  /*
+   * POLLED, because opacity is TRANSITIONED (`--erd-trace-duration`, canvas.css). A bare
+   * read lands mid-fade and reports something close to 1, which is what the first version
+   * of this did — it failed three runs out of three while the screenshot plainly showed
+   * two dimmed boxes. `expect.poll` retries until the transition has landed; a
+   * `waitForTimeout` would pass here and rot the moment the duration changed.
+   */
+  await expect
+    .poll(
+      async () =>
+        page
+          .locator('.erd-node:not([data-traced])')
+          .evaluateAll(
+            (nodes) => nodes.filter((node) => Number(getComputedStyle(node).opacity) < 0.9).length,
+          ),
+      { message: 'the untraced boxes did not actually recede' },
+    )
+    .toBe(2)
+
+  /*
+   * And the connectors off the path drop their labels, while the traced one keeps its.
+   *
+   * Worth asserting separately because the label is NOT inside the edge it belongs to:
+   * `EdgeLabelRenderer` portals it into React Flow's own label layer, so every selector
+   * that descends from `.erd-edge` misses it. The first version of the CSS rule did
+   * exactly that and the dimmed labels stayed on screen — caught by looking at a
+   * screenshot, which no count of nodes would have shown.
+   */
+  await expect(page.locator('.erd-edge__label:visible')).toHaveCount(1)
+  await expect(page.locator('.erd-edge__label[data-traced]')).toBeVisible()
 })
 
 test('dragging a table moves it, follows the cursor, and is one undo step', async ({ page }) => {
