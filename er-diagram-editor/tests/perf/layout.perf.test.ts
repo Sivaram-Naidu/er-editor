@@ -13,43 +13,10 @@
  */
 import { describe, expect, it } from 'vitest'
 
-import {
-  createAttribute,
-  createDiagram,
-  createEntity,
-  createRelationship,
-  type Diagram,
-} from '../../src/domain'
 import { fromElkGraph } from '../../src/layout/elk/fromElkGraph'
 import { toElkGraph } from '../../src/layout/elk/toElkGraph'
 import { measureAll } from '../../src/layout'
-
-/** SRS §5.1: 120 entities, 8 attributes each, 150 relationships. */
-function referenceSchema(entityCount = 120, relationshipCount = 150): Diagram {
-  const entities = Array.from({ length: entityCount }, (_, index) =>
-    createEntity({
-      name: `TABLE_${String(index)}`,
-      attributes: Array.from({ length: 8 }, (_, field) =>
-        createAttribute({
-          name: `field_${String(field)}`,
-          dataType: 'varchar(255)',
-          isPrimaryKey: field === 0,
-        }),
-      ),
-    }),
-  )
-
-  const relationships = Array.from({ length: relationshipCount }, (_, index) => {
-    const from = entities[index % entityCount]!
-    const to = entities[(index * 7 + 3) % entityCount]!
-    return createRelationship({ from: from.id, to: to.id, name: `rel_${String(index)}` })
-  }).filter((relationship) => {
-    const [a, b] = relationship.participants
-    return a?.entityId !== b?.entityId
-  })
-
-  return createDiagram({ name: 'reference', entities, relationships })
-}
+import { referenceSchema } from '../fixtures/referenceSchema'
 
 async function runElk(graph: unknown): Promise<unknown> {
   const { default: ELK } = (await import('elkjs/lib/elk.bundled.js')) as {

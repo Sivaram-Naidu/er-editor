@@ -118,15 +118,31 @@ importing it does NOT auto-arrange and the Auto-layout click genuinely moves eve
 | Nothing regressed                               | Screenshots looked at: 120 boxes laid out, minimap populated, edges routed. Hover traces 3 boxes and dims 15, with the connectors highlighted. Inline rename redraws the box. **Zero console errors.** |
 | The gate                                        | `pnpm verify` green, all 16 e2e specs included.                                                                                                                                                        |
 
+### Verified in a real browser (Chrome, 11 Sep 2026 — NFR-1.3 / NFR-1.4 session)
+
+Production build (`vite preview`), 120-entity reference schema, all boxes framed before
+every measurement. `pnpm test:perf:browser` reproduces every row.
+
+| Thing                                       | Evidence                                                                                                                                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The layout apply, worst `longtask` of 3 runs | **57 / 58 / 66 ms (L0), 0 / 0 / 0 ms (L1), 58 / 58 / 73 ms (L2)** over three separate invocations. `longtask` has a 50 ms floor by definition, so an L1 reading of 0 means "no task crossed the clause's threshold at all".   |
+| NFR-1.4's clause, narrowed rather than met   | The residue is one task at the end of a deliberate, once-per-session action. Buying it back means staging positions over frames while FR-3.4 still demands one undo step — a second two-tier overlay. Decision recorded in the SRS row. |
+| NFR-1.3, measured in a browser at last       | Follow zoom: hover p95 **49 / 56 / 57 ms**, selection **68 / 74 / 82 ms**, keystroke **13 ms**. All inside the 100 ms budget, over three runs.                                                                               |
+| NFR-1.3, pinned to All fields                | **Missed.** Selection p95 **147 / 161 / 162 ms** on every run; hover **83 / 91 / 195 ms**. Keystrokes fine at 13–16 ms. This is Tier 1 item 1, promoted out of Tier 3 on the strength of it.                                  |
+| The measurement is honest about itself       | `t0` is the trusted event's own `timeStamp`, not a driver-side clock, so the CDP round trip is excluded; `t1` is taken in the `requestAnimationFrame` after the change is observable, so React's render and commit are included. |
+| The dev-build trap cannot recur              | `perf.spec.ts` asserts no `/@vite/client` and an `/assets/` entry chunk before it measures anything, and `playwright.config.ts` refuses to run the file at all.                                                              |
+| Nothing regressed                            | `pnpm verify` green. Zero `role="alert"` after every layout.                                                                                                                                                                |
+
 ### Known broken
 
-1. **NFR-1.4's "never blocks the main thread for more than 50 ms" is still violated** —
-   but by 1 ms at L1 and 5 ms at L2 on 120 entities, and by 85 ms at the 300-entity
-   ceiling. Not by 473 ms: that was a dev-build measurement, corrected on 11 Sep 2026.
-   The production build now blocks for **0 / 51 / 55 ms** at L0 / L1 / L2 on 120 entities
-   and **135 ms** at 300. What is left is React Flow adopting N new node objects and the
-   browser laying out N moved boxes, neither of which memoisation can remove. Tier 1
-   item 1, which now needs a decision rather than more profiling.
+1. **NFR-1.3 is missed when Detail is pinned to All fields.** Selection p95
+   **147–162 ms** against a 100 ms budget, on every run; hover **83–195 ms**. At the detail
+   level the tool actually uses at 120 tables (Follow zoom, so L0) it is met, at 49–57 ms
+   for hover and 68–82 ms for selection. Measured in Chrome on the production build,
+   11 Sep 2026 — the first time this requirement had ever been checked outside jsdom. Cause
+   and plan in Tier 1 item 1. **NFR-1.4's clause is no longer on this list**: it was
+   narrowed on 11 Sep 2026 to exclude the single task that applies a layout, which is what
+   it was always protecting against interference with. See the SRS row for the reasoning.
 2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
@@ -177,6 +193,11 @@ evidence:
 - **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
+- **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
+test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`, because
+  they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
+  assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
+  and says why.
 - Bundle 719 kB raw, 225 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
   inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
   only, never at boot.
@@ -197,8 +218,11 @@ protecting:
   Chrome, a real 71-table dump imports with no overlaps at all, and the two shapes that
   broke it — realistic column names, and one hub with 40 dependents — are both fixed with
   browser evidence above. What is still unproven is that it stays RESPONSIVE while doing
-  it: NFR-1.4's 50 ms main-thread clause is still missed — by 5 ms at 120 entities and
-  85 ms at 300, measured on the production build (Tier 1 item 1).
+  it: NFR-1.3's 100 ms interaction budget is missed with Detail pinned to All fields —
+  selection p95 147–162 ms at 120 entities, measured on the production build (Tier 1
+  item 1). It is met at the detail level the tool actually uses at that size, which is the
+  LOD mechanism doing its job, but "usable at 120 tables" has to mean usable with the
+  fields showing.
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
 - **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
@@ -268,68 +292,60 @@ almost entirely into the layers a unit test can reach.
 
 ## Tier 1 — what running it on real data found
 
-The name of this tier has changed twice, and the changes are the record. It was "make it
-work at all" while clicking a table did nothing, the minimap was blank and auto-layout
-threw. It became "find out whether it works on real data" once those were fixed. That
-investigation has now run — a real 71-table PostgreSQL dump and a schema shaped like an
-enterprise warehouse — and items 1 to 3 below are what it found. Two of the three are
-things no count-based benchmark would ever have surfaced.
+The name of this tier has changed three times now, and the changes are the record. It was
+"make it work at all" while clicking a table did nothing, the minimap was blank and
+auto-layout threw. It became "find out whether it works on real data" once those were fixed,
+and that investigation ran: a real 71-table PostgreSQL dump and a schema shaped like an
+enterprise warehouse. Both of the things it found — boxes whose size the tool was wrong
+about, and a graph shape it was indifferent to — are fixed, with browser evidence above.
 
-What it also established, and is worth not re-deriving: 120 tables lay out in under a second
-in Chrome, a real dump imports with no overlaps at all, and the ~840 ms the perf suite
-reports in-process was an honest number. The tool is not slow. It is wrong about the size of
-its own boxes, and indifferent to the shape of the graph.
+What is left in this tier is the third question, which the first two were hiding: the tool
+lays out 120 tables in under a second, but is it RESPONSIVE while you use them? That had
+never been measured outside jsdom. It has now, and the answer is item 1.
 
-### 1. The last 5 ms of NFR-1.4 — needs a decision, not more profiling
+Worth not re-deriving: 120 tables lay out in under a second in Chrome, a real dump imports
+with no overlaps at all, and the ~840 ms the perf suite reports in-process was an honest
+number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
+identified reason.
 
-NFR-1.4 says "never blocks the main thread for more than 50 ms at a time". **Partly done on
-11 Sep 2026.** Profiled, measured, and roughly halved; what is left needs an approach
-agreed before anyone builds it. Evidence is in the 11 Sep browser table above.
+### 1. Stop rebuilding every node object on hover and on selection
+
+**Promoted from Tier 3 on 11 Sep 2026, because it stopped being speculative.** The old
+Tier 3 entry ended "Measure first: at four entities it is free, and the cost has never been
+measured at scale." It has been measured at scale, in Chrome, on the production build, and
+it is what makes NFR-1.3 fail.
 
 **Already established — do not redo this.**
 
-- **The 323/142/473 ms on record were dev-build numbers.** The same harness against the
-  production build gives **51 / 62 / 96 ms** at L0 / L1 / L2 on 120 entities. React's
-  development build is most of what was being measured. The SRS row has been corrected.
-- **The command is not the cost.** In the dev CPU profile of the apply, Immer is ~15 ms,
-  the whole validation pass ~7 ms and the store publish under 1 ms, against a 417 ms block.
-  Chunking `applyLayout` or keeping revalidation off the layout path would buy nothing.
-  That rules out one of the three levers the earlier version of this item listed.
-- **What HAS been fixed:** a position-only change was re-rendering every box's entire
-  contents. React Flow passes a node's position to the node component as
-  `positionAbsoluteX` / `positionAbsoluteY` props, so the default `memo` comparison breaks
-  on every move — and `Canvas` separately handed every node a freshly built
-  `tracedAttributeIds` Set and `foreignKeyTargets` Map, because both were rebuilt inside the
-  node memo keyed on the whole `Diagram`. One layout at 120 entities and L2 cost 120
-  `EntityNode` renders and **1,920 `AttributeRow` renders**; it now costs **zero of each**.
-  Blocks went 51 / 62 / 96 → **0 / 51 / 55 ms** at 120 entities, and **202 → 135 ms** at the
-  300-entity ceiling. `tests/unit/render/redraw.test.tsx` is the guard.
-- **Two levers tried and measured as no-ops. Do not try them again.**
-  `startTransition` around the apply changes nothing, because both stores are read through
-  `useSyncExternalStore` and React de-opts a transition containing one to synchronous
-  rendering. Making the `edges` array reference-stable across a move also changes nothing.
+- **The numbers**, 120 entities, all boxes framed, 25 samples per gesture, three runs,
+  `pnpm test:perf:browser`. With Detail on **Follow zoom** (so L0, which is what the tool
+  actually shows at this size): hover p95 **49 / 56 / 57 ms**, selection **68 / 74 / 82 ms**,
+  keystroke **13 ms** — all inside NFR-1.3's 100 ms. With Detail pinned to **All fields**:
+  selection p95 **147 / 161 / 162 ms**, missing on every run, and hover **83 / 91 / 195 ms**.
+  Keystrokes are never the problem, at 13–16 ms in every state.
+- **The cause is the one already written down**, and the measurement did not change it:
+  `Canvas` takes `hoveredEntityId` and the selection as props and rebuilds all N node
+  objects through the `baseNodes` memo, walking every attribute of every entity, on every
+  hover and every click. CLAUDE.md's split-store note already promises this does not happen
+  ("hover is separated _so that_ it does not re-render every table"); `Canvas` does not
+  honour it.
+- **Selection is worse than hover, and that is new.** The old entry was about hover only.
+  Whatever is done for hover has to cover the selection path too, or the worse of the two
+  numbers survives.
+- **The move is unchanged:** have `EntityNode` subscribe to trace and selection state by
+  its own id instead of receiving them in `node.data`. `sameEntityNode` and
+  `tests/unit/render/redraw.test.tsx` are the existing shape for asserting that N boxes did
+  NOT re-render; extend them rather than starting a new pattern.
+- **What NOT to reach for.** `startTransition` around a store-driven update does nothing —
+  React de-opts a transition containing a `useSyncExternalStore` read to synchronous
+  rendering, measured and confirmed. A reference-stable `edges` array does nothing either.
+  Both were measured on the layout path in the session below; the same two stores carry
+  hover, so the same conclusion holds.
 
-**What is left, and the decision it needs.** The residue is not ours to memoise away. At
-300 entities the production profile shows React Flow's own `StoreUpdater` effect spending
-64 ms adopting the new node objects, ~230 ms of React render and commit across the window,
-and ~405 ms of browser-internal style and layout for 300 moved boxes. Getting a single task
-under 50 ms from there means **not applying the whole layout in one go** — spreading the
-positions over several frames.
-
-That is a product decision as much as a technical one, so it wants agreeing first:
-
-- The user would see the diagram rearrange in waves rather than snap into place. That may
-  read as better (an animated relayout) or as slower. It is a visible change either way.
-- Auto-layout must remain ONE undo step (FR-3.4), so the command still has to be applied
-  once. Only what reaches the canvas can be staged, which means holding positions outside
-  the document for the duration — the same two-tier shape a drag already has in `trace.ts`,
-  and fighting controlled mode for longer.
-- The alternative is to accept 55 ms and rewrite the NFR, on the grounds that one 55 ms
-  task at the end of a deliberate, one-per-session action is not what the clause is
-  protecting. The clause protects interaction; NFR-1.3 already covers that separately.
-
-Note NFR-1.3's 100 ms interaction budget has still never been measured in a browser, and
-the same path carries it.
+**How to check it.** `pnpm test:perf:browser` prints all six figures and flags any that miss
+NFR-1.3. The assertions in it are deliberately an order-of-magnitude guard rather than the
+budget, because the budget is currently missed — lower
+`INTERACTION_REGRESSION_CEILING_MS` to 100 and delete its note when this lands.
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)
 
@@ -360,17 +376,7 @@ In order:
 4. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-5. **Stop rebuilding every node object on hover.** The performance half of the
-   click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
-   split-store note already promises ("hover is separated _so that_ it does not re-render
-   every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
-   rebuilds all N nodes through the `baseNodes` memo on every hover. Not a correctness bug
-   any more — carrying `measured` made rebuilds harmless — so this is now purely about not
-   doing O(entities x attributes) work per hover at 120 tables. The move is to have
-   `EntityNode` subscribe to trace state by its own id instead of receiving it in
-   `node.data`. Measure first: at four entities it is free, and the cost has never been
-   measured at scale.
-6. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+5. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.

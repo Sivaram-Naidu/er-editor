@@ -20,6 +20,10 @@ pnpm dev
 pnpm test          # unit only, ~55s on this machine
 pnpm test:coverage # enforces 80%; NOT part of verify — run it yourself
 pnpm test:perf     # layout budgets, slow, run when touching layout or measurement
+pnpm test:perf:browser
+                   # NFR-1.3 / NFR-1.4 in Chrome against `vite preview`, ~2 min. Its own
+                   # playwright.perf.config.ts, because these MUST measure the production
+                   # build. Not in verify — wall-clock assertions are a command you run.
 pnpm test:e2e      # 16 specs on the system Chrome, ~40s. No browser install needed:
                    # playwright.config.ts sets `channel: 'chrome'`. Part of verify.
 ```
@@ -257,6 +261,26 @@ culling off.
   avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
   nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
   store here is Zustand, so this applies to all of them.
+- **`longtask` has a 50 ms floor, so a reading of 0 is information and not a gap.** The
+  browser emits an entry only for a task that already exceeded the threshold, which is
+  exactly what NFR-1.4's clause asks about and is why the observer is the right instrument.
+  It also means readings near the threshold are bimodal — the same build, minutes apart,
+  gives `[0, 51, 0]` then `[57, 0, 0]`. Summarise with the WORST of several runs; a median
+  over values clustered on a detection threshold is noise.
+- **A latency probe that asks "has anything changed" measures the previous sample.** The
+  first version of `perf.spec.ts` asked whether ANY node was traced or selected, so each
+  sample had to clear the last one first — and the cheap way to do that, parking the pointer
+  at `(4, 4)` and clicking, presses whatever sits in the TOOLBAR's top-left corner rather
+  than hitting the canvas. Selection therefore stayed set between samples, the predicate was
+  already true when the probe armed, and it reported ~40 ms for something that takes ~120.
+  It looked like a good result. Anchor the predicate to the target element's own id, skip a
+  sample whose target is already in the state under test, and never assume a coordinate is
+  on the canvas just because it is near the edge.
+- **An interaction-latency sample has to start from an idle main thread.** Firing the next
+  gesture 60 ms after the last one charges the leftover render to the new input: the same
+  build measured hover at p95 44 ms with a settle and 148 ms without. Both numbers are real,
+  but only the first is what NFR-1.3 asks for. `settle()` waits for three consecutive
+  animation frames on schedule rather than guessing at a `waitForTimeout`.
 - **Measure performance against the production build, not `pnpm dev`.** NFR-1.4's
   main-thread numbers sat in the SRS for a day as 323/142/473 ms; the same clicks against
   `vite preview` gave 51/62/96 ms. React's development build — `jsxDEV`, prop validation,
