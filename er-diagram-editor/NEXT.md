@@ -150,17 +150,47 @@ while the median moved by 10 ms. `pnpm test:perf:browser` reproduces it.
 | Selection deliberately does NOT reuse nodes  | React Flow keeps its own `selected` on the internal node and re-reads ours only when the object reference differs. Reusing left a shift-clicked pair showing one highlight while the store held two. |
 | Nothing regressed                            | `pnpm verify` green, 16 e2e specs, 720 unit tests. The shift-click regression above was caught by the e2e suite, not by review.                                                       |
 
+### Verified in a real browser (Chrome, 11 Sep 2026 — cold-click mechanism session)
+
+Production build, 120 entities, Detail pinned to All fields, all boxes framed. 20 samples
+per condition, and the conditions are **interleaved one sample at a time** rather than swept,
+because a swept A/B on this canvas measures the run order (see "Known broken" 2).
+
+Every primary reading is a COUNT or a block duration taken at the instant of the trusted
+`pointerdown`, from inside the page, with no driver round trip between the move and the
+press — inserting one changes the gap under study.
+
+| Condition                    | pointerdown→frame | →DOM | DOM→frame | EntityNode | AttributeRow | transitions running | blocked (longtask) |
+| ---------------------------- | ----------------- | ---- | --------- | ---------- | ------------ | ------------------- | ------------------ |
+| COLD (settle → move → press) | **195 ms**        | 190  | 6         | **4**      | **32**       | 164                 | **172 ms**         |
+| WARM (move → settle → press) | **41 ms**         | 36   | 5         | **4**      | **32**       | 0                   | **0 ms**           |
+| COLD, dimming neutralised    | 119 ms            | 112  | 6         | 4          | 32           | 42                  | 104 ms             |
+| COLD, all trace CSS off      | 111 ms            | 104  | 7         | 4          | 32           | 0                   | 97 ms              |
+| COLD, all transitions off    | 154 ms            | —    | —         | 4          | 32           | **0**               | —                  |
+
+| Thing                                          | Evidence                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The press does identical React work either way** | **4 `EntityNode` and 32 `AttributeRow` renders, in every condition, in every run.** Counters read inside the page, snapshotted in the capture phase of the trusted `pointerdown` and again at the frame showing `.selected`. This is the comparison item 1 asked for, and it comes back a dead heat. |
+| So the extra cost is not React                 | Follows from the row above by the item's own decision rule. What it is instead is below.                                                                                                                                                  |
+| It is not the frame pipeline either            | `DOM→frame` — the class landing to the frame that can show it — is **5-7 ms in every condition**, cold and warm alike. All of the difference is in `pointerdown → the class actually being set`: 190 ms cold against 36 ms warm.           |
+| It is synchronous blocking, not queueing       | A `longtask` overlapping the press measures **172 ms cold and nothing at all warm** (warm produces no entry, so it is under `longtask`'s 50 ms floor). The cold press blocks the main thread inside its own task.                          |
+| **The running transitions are a correlate, not a cause** | 164 CSS transitions are still running when the cold press lands, against 0 for warm — which looks like the answer and is not. Disabling every transition takes the count to **0** and leaves the latency at **154 ms**. Ablated, not assumed. |
+| Roughly half the cost is the trace's own repaint | Neutralising the dimming rule alone: 195 → **119 ms**. Neutralising every trace declaration: → **111 ms**. So the visual half of a hover is real and is about 80 ms of it.                                                                 |
+| The other half survives with the trace invisible | With every trace declaration neutralised the press still blocks for **97 ms**. What is left is the hover's DOM attribute mutations and the style re-matching they force — and note a CSS override cannot remove the **`:has()` matching cost**, only the declarations, so this ablation under-states that half. |
+| **The 172 ms gap on record is the wrong gesture** | The move→press gap in the gesture `perf.spec.ts` actually measures is **47-51 ms** (one run 121). The 172 ms belongs to `coldClick`, which parks at (8,8) and does a round-tripping `elementFromPoint` check first: measured **248 ms** from its first move and **65 ms** from its last. See the correction in item 1. |
+
 ### Known broken
 
-1. **NFR-1.3 is still missed when a click follows the pointer onto a box and Detail is
-   pinned to All fields.** Median **99–108 ms** against a 100 ms budget. Hover is fixed —
-   median 43–53 ms, down from 59–99 — and the same click with the main thread settled after
-   the pointer arrives costs **25 ms**. The two figures have never been reconciled, and the
-   explanation on record until 11 Sep 2026 ("the hover and the selection arrive together")
-   is **wrong**: the press lands 172 ms after the move, by which time both the hover render
-   and its 120 ms transition are finished. Tier 1 item 1 carries what to do about it. At the
-   detail level the tool actually uses at 120 tables (Follow zoom, so L0) everything is
-   inside budget.
+1. **NFR-1.3 is missed when a click follows the pointer onto a box and Detail is pinned to
+   All fields.** The press blocks the main thread for **~172 ms** against a 100 ms budget,
+   and the same click with the pointer already resting on the box blocks for nothing
+   measurable. **As of 11 Sep 2026 the cause is known**: not React — the press does an
+   identical 4 `EntityNode` / 32 `AttributeRow` renders either way — but the style and layout
+   the hover left pending, flushed synchronously inside the press's handler. The CSS
+   transitions still running at that moment are a correlate and were ablated away without
+   helping. Tier 1 item 1 carries the measurements and the three ways out; what is open is
+   the choice, not the diagnosis. At the detail level the tool actually uses at 120 tables
+   (Follow zoom, so L0) everything is inside budget.
    **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
    single task that applies a layout, which is what it was always protecting against
    interference with. See the SRS row.
@@ -338,48 +368,74 @@ with no overlaps at all, and the ~840 ms the perf suite reports in-process was a
 number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
 identified reason.
 
-### 1. Why a click costs 100 ms when the click itself costs 25 ms
+### 1. A cold click blocks the main thread for ~170 ms, and none of it is React
 
-**The diagnosis in this slot was wrong, and was corrected on 11 Sep 2026 by checking the
-harness instead of trusting it.** It said "a cold click costs a hover and a selection, back
-to back" and proposed deferring the hover by a frame so a press could overtake it. That was
-built, unit-tested, and then thrown away — because the press does not arrive within a frame.
+**Measured on 11 Sep 2026. The open question in this slot is CLOSED; what is left is a
+decision about the fix, which is why the item stays here.** The browser table above has the
+full run.
 
 **Already established — do not redo any of this.**
 
-- **The gap between the pointer landing on a box and the button going down is 172 ms**, in
-  the exact gesture `coldClick` and `perf.spec.ts` send. Measured from the trusted events'
-  own `timeStamp`s. An animation frame is ~16 ms and `--erd-trace-duration` is 120 ms, so by
-  the time the press lands the hover has rendered AND its transition has finished. The two
-  passes do not overlap and nothing about the ordering can be exploited.
-- **So "the hover and the selection serialise" was never true**, and the fix that followed
-  from it could not fire. It was implemented in full (`deferredHover.ts`, a wired-up
-  scheduler, 8 passing unit tests) and reverted, because a mutation check exposed it: the
-  e2e guard still passed with the scheduler's behaviour inverted, which is what sent someone
-  to measure the gap. **A change nothing can distinguish from its own opposite is not a fix.**
-- **The 99-108 ms is therefore the selection pass alone**, measured from pointerdown, not a
-  compound gesture. Which makes the real question sharper, and it is still open:
+- **The press does the SAME React work in both conditions: 4 `EntityNode` and 32
+  `AttributeRow` renders.** Identical in five conditions across three runs, counted inside
+  the page at the trusted `pointerdown` and again at the frame that shows `.selected`. This
+  was the comparison this item asked for, and it settles the branch: **the extra cost is not
+  React.** (The 5/40 on record was a different box; the shape of the answer is the same.)
+- **It is not the frame pipeline either.** Splitting the latency at the moment the class is
+  actually set gives `DOM→frame` of **5-7 ms in every condition**. All of the difference is
+  upstream of the DOM change: **190 ms cold against 36 ms warm.**
+- **The cold press BLOCKS for ~172 ms** — a `longtask` overlapping it — where the warm press
+  emits no entry at all. So it is synchronous work inside the press's own task, not the
+  selection waiting its turn behind an animation.
+- **The 164 running CSS transitions are a correlate, not the cause.** They are the obvious
+  suspect and they are wrong: killing every transition takes the count to 0 and leaves the
+  latency at 154 ms. *This is the second time a plausible story about this gesture has
+  survived until someone ablated it. Ablate it.*
+- **What the press is actually paying for is the style and layout the hover left pending**,
+  flushed synchronously when the press's own handler runs. Neutralising the dimming rule
+  alone takes it 195 → 119 ms; neutralising every trace declaration takes it to 111 ms and
+  still leaves a 97 ms block. The residue is the hover's DOM attribute mutations and the
+  selector re-matching they force — including the two `:has()` rules, whose **matching** cost
+  a CSS override cannot remove, so that ablation under-states its own half.
+- **`settle()` is not cheating.** The warm figure is a real measurement of a real gesture
+  (pressing a box the pointer already rests on); it is simply not the common one. Both
+  numbers are honest and they are measuring different things.
 
-**The open question.** Selecting a box costs **25 ms** when the probe settles the main
-thread AFTER moving the pointer onto it, and **99-108 ms** when it settles BEFORE the move
-and then presses 172 ms later. Same click, same box, same build; the only difference is
-where the idle wait sits relative to the move. Either the 25 ms figure is flattered by
-something the settle absorbs, or something started by the hover is still outstanding 172 ms
-later despite the render and the transition both being finished. **Find out which before
-proposing a fix** — and note that the previous attempt at this failed because it went
-looking for a fix first.
+**Corrected: the 172 ms gap was the wrong gesture.** The gap between the pointer landing on
+the box and the button going down, in the gesture `perf.spec.ts` actually measures, is
+**47-51 ms** — not 172. The 172 ms belongs to `coldClick`, which parks the pointer at (8, 8)
+and does a round-tripping `elementFromPoint` check before the real move: measured at 248 ms
+from its first move and 65 ms from its last. Everything that was inferred from "the 120 ms
+transition has finished before the press arrives" is therefore unsupported — at a 50 ms
+dwell the transition is a third done. It happens not to change the conclusion, because the
+transitions are not the cause either, but the premise was wrong and is corrected here and in
+CLAUDE.md.
 
-**How to investigate it, given the stopwatch is untrustworthy** (Known broken 2): compare
-the two conditions on a MECHANISM, not on time. Render counts per gesture are deterministic
-and already instrumented once — a click with the pointer at rest costs 5 `EntityNode` and 40
-`AttributeRow` renders at 120 entities. Get the same counts for the cold condition. If they
-match, the extra 75 ms is not React and the answer is in the browser's own work; if they do
-not, the counts say exactly what is re-rendering.
+**The decision that needs making.** Three directions, and they are not equivalent:
 
-**Not worth trying.** Deferring or suppressing the hover (above). Reusing node objects on a
-selection render — React Flow keeps its own `selected` and reusing breaks shift-click, which
-has an e2e spec. `startTransition` and a reference-stable `edges` array, both measured as
-no-ops on the layout path and both carried by the same stores.
+1. **Stop the hover dirtying 111 boxes at all.** The dimming is the single biggest
+   contributor (~80 ms of the ~155). Today `data-tracing` on the canvas plus
+   `:not([data-traced])` re-styles every untraced box. Dimming the *canvas* instead — one
+   compositor-friendly opacity on a wrapper holding the untraced layer, or a single overlay —
+   would express the same thing without invalidating N elements. This is the same move that
+   `data-tracing` already made once, taken one step further.
+2. **Drop the two `:has()` rules.** `.react-flow__node:has(.erd-node[data-traced])` makes
+   every `data-traced` change an invalidation question about 120 ancestors. The z-index they
+   carry could be set from React on the handful of traced nodes instead. Cheap to try, and
+   the ablation here could not measure it.
+3. **Accept it and re-word NFR-1.3.** The gesture is a pointer arriving and pressing
+   immediately; the budget is 100 ms; it costs ~195 ms at L2 and is inside budget at the
+   detail level 120 tables actually render at. This is a real option, but it should be taken
+   deliberately rather than by default.
+
+**Whichever is chosen, the guard is a render-count and block-duration assertion, not a
+stopwatch** — the harness for it is in the browser table above and was deleted with the
+session; rebuild it from that description rather than trusting a wall-clock number.
+
+**Not worth trying.** Deferring or suppressing the hover (the reverted scheduler). Reusing
+node objects on a selection render — React Flow keeps its own `selected` and reusing breaks
+shift-click, which has an e2e spec. `startTransition` and a reference-stable `edges` array,
+both measured as no-ops. **Disabling the transitions** — now measured, and a no-op too.
 
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)

@@ -261,13 +261,26 @@ culling off.
   avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
   nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
   store here is Zustand, so this applies to all of them.
-- **Playwright's `mouse.move` then `mouse.down` is not a fast click — there is 172 ms
-  between them.** Each is its own CDP round trip. `coldClick`'s docstring is right that a
-  person does not DWELL, and it is still the correct way to catch a render-window bug, but
-  it is not a way to make two gestures overlap: an animation frame is ~16 ms and
-  `--erd-trace-duration` is 120 ms, so a hover started by the move has fully rendered and
-  finished transitioning before the press arrives. A whole fix was built on the assumption
-  that the two passes serialise before anyone measured the gap. Measure the gap.
+- **Playwright's `mouse.move` then `mouse.down` is not a fast click, but HOW slow depends on
+  the gesture — measure the one you are measuring.** Each call is its own CDP round trip. A
+  bare `mouse.move` then `mouse.down`, which is what `perf.spec.ts` sends, puts **47-51 ms**
+  between them; `coldClick` puts **248 ms** between its FIRST move and the press, because it
+  parks at (8, 8) and does a round-tripping `elementFromPoint` check before the real move
+  (65 ms from that last move). The 172 ms once recorded here was the second gesture, applied
+  to the first. Everything inferred from it — notably "`--erd-trace-duration` is 120 ms, so
+  the hover has finished transitioning before the press arrives" — was therefore unsupported:
+  at a 50 ms dwell the transition is a third done. Corrected 11 Sep 2026.
+- **The obvious outstanding work is not the cause just because it is outstanding.** A cold
+  click on this canvas lands with **164 CSS transitions still running** and costs 195 ms
+  against 41 ms for a warm one, which reads like an open-and-shut case. Disabling every
+  transition takes the count to **0** and the latency to **154 ms**. The real cost is the
+  style and layout the hover left pending, which the press's own handler flushes
+  synchronously — a `longtask` of 172 ms cold against no entry at all warm, with the press
+  doing an identical 4 `EntityNode` / 32 `AttributeRow` renders either way. Two separate
+  plausible stories about this one gesture have now died on contact with an ablation. Split
+  the latency at the DOM mutation (`pointerdown → class set` versus `class set → frame`)
+  before theorising: it says immediately whether you are looking at React, at the browser's
+  style and layout, or at the frame pipeline.
 - **A change that its own test cannot distinguish from its opposite is not a fix.** The
   deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
   assertion still passed with the scheduler's behaviour inverted, which is what exposed it.

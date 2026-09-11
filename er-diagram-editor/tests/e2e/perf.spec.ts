@@ -45,10 +45,16 @@ const INTERACTION_BUDGET_MS = 100
  *
  * ONE GESTURE STILL MISSES NFR-1.3. On the production build at 120 entities with Detail
  * pinned to All fields, a COLD click — move onto a box and press with no dwell, which is
- * what this file samples and what a person does — runs a median of 99-108 ms. Hover was
- * fixed on 11 Sep 2026 (median 59-99 to 43-53 ms) and a click with the pointer already at
- * rest costs 25 ms, so what is left is the two rendering back to back. NEXT.md Tier 1
- * item 1 carries the decision that needs making about it.
+ * what this file samples and what a person does — runs a median of 99-195 ms, against 41 ms
+ * for the same click with the pointer already at rest.
+ *
+ * IT IS NOT THE TWO RENDERING BACK TO BACK. That explanation stood here until 11 Sep 2026
+ * and is wrong: the press does an identical 4 `EntityNode` / 32 `AttributeRow` renders in
+ * both conditions. What it pays for is the style and layout the hover left pending, flushed
+ * synchronously inside the press's own handler — 172 ms of blocked main thread cold, and no
+ * `longtask` entry at all warm. The CSS transitions still running when it lands are a
+ * correlate: ablating them changes nothing. NEXT.md Tier 1 item 1 carries the measurements
+ * and the decision that needs making.
  *
  * So the assertion cannot be the budget without leaving a permanently red command, and it
  * must not be a snug fit around today's figure either: a tripwire that flakes gets muted.
