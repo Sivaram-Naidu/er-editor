@@ -281,6 +281,15 @@ culling off.
   the latency at the DOM mutation (`pointerdown → class set` versus `class set → frame`)
   before theorising: it says immediately whether you are looking at React, at the browser's
   style and layout, or at the frame pipeline.
+- **`:has()` is the famously expensive selector, and on this canvas it is not what is
+  expensive.** `.react-flow__node:has(.erd-node[data-traced])` asks an invalidation question
+  about all 120 wrappers on every hover, which reads like an obvious cost. Both `:has()`
+  rules were removed and the z-index set from React as a class on the traced wrappers
+  instead, then measured against the pair restored as an ablation **in the same interleaved
+  run**: 196 ms against 200 ms, and 169 ms of blocked main thread against 175 ms. Reverted.
+  The lesson is not about `:has()` — it is that a reputation is not a measurement, and that
+  putting the OLD code back as an ablation condition is the only way to A/B a change on this
+  machine, where medians drift 80 ms between runs with nothing changed.
 - **A change that its own test cannot distinguish from its opposite is not a fix.** The
   deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
   assertion still passed with the scheduler's behaviour inverted, which is what exposed it.

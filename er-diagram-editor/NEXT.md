@@ -178,6 +178,8 @@ press — inserting one changes the gap under study.
 | Roughly half the cost is the trace's own repaint | Neutralising the dimming rule alone: 195 → **119 ms**. Neutralising every trace declaration: → **111 ms**. So the visual half of a hover is real and is about 80 ms of it.                                                                 |
 | The other half survives with the trace invisible | With every trace declaration neutralised the press still blocks for **97 ms**. What is left is the hover's DOM attribute mutations and the style re-matching they force — and note a CSS override cannot remove the **`:has()` matching cost**, only the declarations, so this ablation under-states that half. |
 | **The 172 ms gap on record is the wrong gesture** | The move→press gap in the gesture `perf.spec.ts` actually measures is **47-51 ms** (one run 121). The 172 ms belongs to `coldClick`, which parks at (8,8) and does a round-tripping `elementFromPoint` check first: measured **248 ms** from its first move and **65 ms** from its last. See the correction in item 1. |
+| **Removing the `:has()` rules changes nothing** | Measured on 12 Sep 2026 by restoring the pair as an ablation and interleaving it against the version without them: **196 ms vs 200 ms latency, 169 ms vs 175 ms blocked**, n=20 each, same run. Reverted. |
+| Dimming holds up on a second run       | **196 → 122 ms** with the dimming rule neutralised, blocked **169 → 109 ms**, in the same interleaved run. Consistent with the 195 → 119 on the run above. |
 
 ### Known broken
 
@@ -419,10 +421,14 @@ CLAUDE.md.
    compositor-friendly opacity on a wrapper holding the untraced layer, or a single overlay —
    would express the same thing without invalidating N elements. This is the same move that
    `data-tracing` already made once, taken one step further.
-2. **Drop the two `:has()` rules.** `.react-flow__node:has(.erd-node[data-traced])` makes
-   every `data-traced` change an invalidation question about 120 ancestors. The z-index they
-   carry could be set from React on the handful of traced nodes instead. Cheap to try, and
-   the ablation here could not measure it.
+2. ~~**Drop the two `:has()` rules.**~~ **Tried on 11 Sep 2026 and it does nothing.** Both
+   were removed and the z-index set from React as a class on the traced wrappers instead,
+   then measured against the `:has()` pair restored as an ablation **in the same run,
+   interleaved**: **196 ms against 200 ms, and 169 ms of blocked main thread against
+   175 ms**, n=20 each. That is inside the noise floor. The change was reverted rather than
+   kept — it is a no-op that also lets a selected untraced box elevate above the traced path,
+   which is a behaviour change for nothing. `:has()` is the famous expensive selector and it
+   is not what is expensive here. **Do not redo this.**
 3. **Accept it and re-word NFR-1.3.** The gesture is a pointer arriving and pressing
    immediately; the budget is 100 ms; it costs ~195 ms at L2 and is inside budget at the
    detail level 120 tables actually render at. This is a real option, but it should be taken
@@ -435,7 +441,11 @@ session; rebuild it from that description rather than trusting a wall-clock numb
 **Not worth trying.** Deferring or suppressing the hover (the reverted scheduler). Reusing
 node objects on a selection render — React Flow keeps its own `selected` and reusing breaks
 shift-click, which has an e2e spec. `startTransition` and a reference-stable `edges` array,
-both measured as no-ops. **Disabling the transitions** — now measured, and a no-op too.
+both measured as no-ops. **Disabling the transitions** — measured, a no-op too.
+**Removing the `:has()` rules** — measured in-run against itself, a no-op, reverted.
+
+So three of the four plausible stories about this gesture are now dead, and the survivor is
+the dimming repaint. That is where the next attempt goes.
 
 
 ### 2. Search and command palette (FR-2.6, FR-9.2)
