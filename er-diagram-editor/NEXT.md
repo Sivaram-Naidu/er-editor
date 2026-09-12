@@ -181,18 +181,41 @@ press — inserting one changes the gap under study.
 | **Removing the `:has()` rules changes nothing** | Measured on 12 Sep 2026 by restoring the pair as an ablation and interleaving it against the version without them: **196 ms vs 200 ms latency, 169 ms vs 175 ms blocked**, n=20 each, same run. Reverted. |
 | Dimming holds up on a second run       | **196 → 122 ms** with the dimming rule neutralised, blocked **169 → 109 ms**, in the same interleaved run. Consistent with the 195 → 119 on the run above. |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — scrim session)
+
+Production build, 120 entities, All fields, 20 samples per condition, conditions
+**interleaved**. The "before" is the per-node dimming restored as an ablation, so before and
+after are one run rather than two — and it is `display: none` on the scrim rather than
+`opacity: 0`, because an always-present composited layer changes how Chrome layerises the
+viewport even when invisible, and a first attempt measured the "before" 46 ms too fast.
+
+| Condition                          | pointerdown→frame | blocked | style | paint+ |
+| ---------------------------------- | ----------------- | ------- | ----- | ------ |
+| BEFORE — dimming on every box      | 119 / 139 / 139 / 135 | 106 / 119 / 120 / 117 | 16-21 ms | 94-105 |
+| **AFTER — one scrim**              | **105 / 114 / 119 / 115** | **84 / 102 / 98 / 101** | **11-14 ms** | **78-90** |
+| Ceiling — no dimming at all        | 107 / 106 / 107 / 113 | 92 / 91 / 93 / 95 | 13-14 ms | 72-83 |
+| WARM (pointer already on the box)  | 36 / 37 / 35 / 36 | 0 | 2 ms | 41-49 |
+
+| Thing                                   | Evidence                                                                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The scrim reaches the ceiling           | AFTER lands **at or below** the figure for removing dimming outright, across four runs, while still dimming. ~20 ms of latency and ~20 ms of blocked main thread against the per-node rule.            |
+| It is dimming the right things          | Measured in the page mid-hover: scrim opacity **0.45** at z **1**, traced wrappers at z **5**, untraced at z **0**, and an untraced box's OWN opacity is **1** — it is not dimming itself any more.    |
+| Edges stay behind boxes                 | Screenshot looked at. The first build lifted the whole `.react-flow__edges` layer over the scrim and **every connector drew through every untraced table** — a grid of lines crossing boxes. Only traced edges are lifted now (`zIndex: 2` per edge). |
+| Render counts still identical           | 4 `EntityNode` / 32 `AttributeRow` charged to the press, unchanged in every condition. The scrim changes what the browser paints, not what React does.                                                 |
+| It is still outside NFR-1.3             | 105-119 ms against a 100 ms budget. Narrowed, not met. See item 1.                                                                                                                                    |
+| The gate                                | `pnpm verify` green, 16 e2e specs, including the hover spec rewritten onto the new mechanism.                                                                                                          |
+
 ### Known broken
 
-1. **NFR-1.3 is missed when a click follows the pointer onto a box and Detail is pinned to
-   All fields.** The press blocks the main thread for **~172 ms** against a 100 ms budget,
-   and the same click with the pointer already resting on the box blocks for nothing
-   measurable. **As of 11 Sep 2026 the cause is known**: not React — the press does an
-   identical 4 `EntityNode` / 32 `AttributeRow` renders either way — but the style and layout
-   the hover left pending, flushed synchronously inside the press's handler. The CSS
-   transitions still running at that moment are a correlate and were ablated away without
-   helping. Tier 1 item 1 carries the measurements and the three ways out; what is open is
-   the choice, not the diagnosis. At the detail level the tool actually uses at 120 tables
-   (Follow zoom, so L0) everything is inside budget.
+1. **NFR-1.3 is still missed, narrowly, when a click follows the pointer onto a box and
+   Detail is pinned to All fields.** **105-119 ms against a 100 ms budget**, down from ~195
+   after the scrim landed on 12 Sep 2026; blocked main thread ~96 ms, down from ~170. The
+   cause is known and the one fix worth making is in: not React (the press does an identical
+   4 `EntityNode` / 32 `AttributeRow` renders either way), but the paint the hover left
+   pending. What is left is not a hot spot — removing dimming ENTIRELY still costs 106-113 ms
+   — so Tier 1 item 1 is now a decision about the requirement rather than a bug. At the
+   detail level the tool actually uses at 120 tables (Follow zoom, so L0) everything is
+   inside budget, and a click with the pointer already resting on the box is 36 ms.
    **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
    single task that applies a layout, which is what it was always protecting against
    interference with. See the SRS row.
@@ -370,11 +393,13 @@ with no overlaps at all, and the ~840 ms the perf suite reports in-process was a
 number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
 identified reason.
 
-### 1. A cold click blocks the main thread for ~170 ms, and none of it is React
+### 1. A cold click is still outside NFR-1.3, and what is left is a decision
 
-**Measured on 11 Sep 2026. The open question in this slot is CLOSED; what is left is a
-decision about the fix, which is why the item stays here.** The browser table above has the
-full run.
+**The open question in this slot is CLOSED, and the one fix worth making has landed.**
+Measured 11 Sep, fixed 12 Sep 2026. A cold click was ~195 ms and blocked the main thread for
+~170 ms; it is now **105-119 ms**, blocking ~96 ms, against a 100 ms budget. The item stays
+open because that is still a miss — but every mechanism anyone has proposed for it has now
+been measured, three of the four were no-ops, and what is left is option 3 below.
 
 **Already established — do not redo any of this.**
 
@@ -415,12 +440,15 @@ CLAUDE.md.
 
 **The decision that needs making.** Three directions, and they are not equivalent:
 
-1. **Stop the hover dirtying 111 boxes at all.** The dimming is the single biggest
-   contributor (~80 ms of the ~155). Today `data-tracing` on the canvas plus
-   `:not([data-traced])` re-styles every untraced box. Dimming the *canvas* instead — one
-   compositor-friendly opacity on a wrapper holding the untraced layer, or a single overlay —
-   would express the same thing without invalidating N elements. This is the same move that
-   `data-tracing` already made once, taken one step further.
+1. ~~**Stop the hover dirtying 111 boxes at all.**~~ **Done 12 Sep 2026.** One overlay
+   (`.erd-scrim`, rendered through React Flow's `ViewportPortal`) sits between the untraced
+   boxes and the traced ones and dims by compositing instead of by repainting 111 boxes and
+   ~1,900 rows. It reaches the ceiling that removing dimming outright defines: **~119 → ~110
+   ms, blocked ~118 → ~96 ms**, over four interleaved runs. Two things it cost, both in the
+   browser table: untraced connectors lost the slightly-lighter dim they used to get, because
+   an element behind a wash cannot show through more than the wash allows; and only TRACED
+   edges are lifted over the scrim, after lifting the whole edge layer turned the diagram
+   into a grid of lines drawn through tables.
 2. ~~**Drop the two `:has()` rules.**~~ **Tried on 11 Sep 2026 and it does nothing.** Both
    were removed and the z-index set from React as a class on the traced wrappers instead,
    then measured against the `:has()` pair restored as an ablation **in the same run,
@@ -429,10 +457,14 @@ CLAUDE.md.
    kept — it is a no-op that also lets a selected untraced box elevate above the traced path,
    which is a behaviour change for nothing. `:has()` is the famous expensive selector and it
    is not what is expensive here. **Do not redo this.**
-3. **Accept it and re-word NFR-1.3.** The gesture is a pointer arriving and pressing
-   immediately; the budget is 100 ms; it costs ~195 ms at L2 and is inside budget at the
-   detail level 120 tables actually render at. This is a real option, but it should be taken
-   deliberately rather than by default.
+3. **Accept the rest and re-word NFR-1.3.** Now the only one left. The gesture is a
+   pointer arriving and pressing immediately; the budget is 100 ms; it costs **105-119 ms**
+   at L2 after the scrim, and is comfortably inside budget at the detail level 120 tables
+   actually render at. What remains is not a hot spot with a name — with dimming removed
+   ENTIRELY the same gesture still costs 106-113 ms, so the residue is the cost of a
+   selection render landing on a main thread that has just done a hover, not any one rule.
+   Buying it back means making the hover itself cheaper, which is a different item.
+   **This is now a decision to take rather than a bug to fix.**
 
 **Whichever is chosen, the guard is a render-count and block-duration assertion, not a
 stopwatch** — the harness for it is in the browser table above and was deleted with the

@@ -160,14 +160,38 @@ test('hovering a table traces its neighbourhood and pushes the rest back', async
   await expect
     .poll(
       async () =>
-        page
-          .locator('.erd-node:not([data-traced])')
-          .evaluateAll(
-            (nodes) => nodes.filter((node) => Number(getComputedStyle(node).opacity) < 0.9).length,
-          ),
-      { message: 'the untraced boxes did not actually recede' },
+        page.locator('.erd-scrim').evaluate((scrim) => Number(getComputedStyle(scrim).opacity)),
+      { message: 'the scrim did not fade in, so nothing is receding' },
     )
-    .toBe(2)
+    .toBeGreaterThan(0.1)
+
+  /*
+   * And it is dimming the RIGHT things, which is the half a single opacity reading cannot
+   * see. The scrim only works because it sits between the untraced boxes and the traced
+   * ones in the viewport's stacking context — get that wrong and it either dims nothing or
+   * dims the traced path along with everything else, both of which leave its own opacity
+   * looking perfectly correct.
+   */
+  const bands = await page.evaluate(() => {
+    const z = (selector: string): number =>
+      Number(getComputedStyle(document.querySelector(selector)!).zIndex)
+    return {
+      scrim: z('.erd-scrim'),
+      traced: z('.react-flow__node:has(.erd-node[data-traced])'),
+      untraced: z('.react-flow__node:not(:has(.erd-node[data-traced]))'),
+    }
+  })
+  expect(bands.untraced, 'untraced boxes must sit BEHIND the scrim').toBeLessThan(bands.scrim)
+  expect(bands.traced, 'traced boxes must sit IN FRONT of the scrim').toBeGreaterThan(bands.scrim)
+
+  // At rest it is invisible, so it can stay mounted and cost a composite rather than a
+  // React commit per hover.
+  await page.mouse.move(4, 400)
+  await expect
+    .poll(async () =>
+      page.locator('.erd-scrim').evaluate((scrim) => Number(getComputedStyle(scrim).opacity)),
+    )
+    .toBe(0)
 
   /*
    * And the connectors off the path drop their labels, while the traced one keeps its.
@@ -178,6 +202,8 @@ test('hovering a table traces its neighbourhood and pushes the rest back', async
    * exactly that and the dimmed labels stayed on screen — caught by looking at a
    * screenshot, which no count of nodes would have shown.
    */
+  await page.mouse.move(point.x, point.y)
+  await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
   await expect(page.locator('.erd-edge__label:visible')).toHaveCount(1)
   await expect(page.locator('.erd-edge__label[data-traced]')).toBeVisible()
 })

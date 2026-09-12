@@ -290,6 +290,28 @@ culling off.
   The lesson is not about `:has()` — it is that a reputation is not a measurement, and that
   putting the OLD code back as an ablation condition is the only way to A/B a change on this
   machine, where medians drift 80 ms between runs with nothing changed.
+- **A diagram-wide dim is one composited layer, not an opacity on every element.**
+  `.erd-canvas[data-tracing] .erd-node:not([data-traced])` set an opacity on all 111
+  untraced boxes, which at L2 repaints them and their ~1,900 rows; a cold click blocked for
+  ~170 ms and most of it was paint. `.erd-scrim` — one div, rendered through React Flow's
+  `ViewportPortal` — now does it by compositing, and lands on the ceiling that removing the
+  dimming outright defines. Three things make it work, and all three are easy to lose:
+  - **It has to be INSIDE the viewport.** `.react-flow__viewport` carries a transform, so it
+    is the only stacking context on the canvas; `.react-flow__edges` and `.react-flow__nodes`
+    are both `z-index: auto` and create none, which is why every edge and node wrapper
+    competes directly in it and one element can sit between untraced boxes (z 0) and traced
+    ones (z 5). Asked of the browser, not read off React Flow's stylesheet — and it is not a
+    contract, so check it again if React Flow's DOM changes.
+  - **Lift only the TRACED edges over it.** Lifting the whole `.react-flow__edges` layer was
+    built first and looked wrong in a way no assertion caught: every connector then drew on
+    top of every untraced table, so the diagram became a grid of lines crossing through
+    boxes. Found by looking at the screenshot.
+  - **An element behind a wash cannot show through more than the wash allows.** Untraced
+    connectors used to keep `--erd-dim-opacity + 0.15` so thin lines survived dimming. Under
+    a scrim that rule dims them twice; it is gone, and they now take the same dim as boxes.
+  - It stays MOUNTED and fades by CSS, because a mount per hover is a commit per hover —
+    which is the cost being removed. It never appears on the export surface, which passes no
+    hover state at all.
 - **A change that its own test cannot distinguish from its opposite is not a fix.** The
   deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
   assertion still passed with the scheduler's behaviour inverted, which is what exposed it.

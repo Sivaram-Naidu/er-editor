@@ -351,10 +351,33 @@
  *
  * `:not([data-traced])` is doing the same job the old boolean did, and reads the same way:
  * while something is traced, anything that is not traced recedes. */
-.erd-canvas[data-tracing] .erd-node:not([data-traced]),
-.erd-canvas[data-tracing] .erd-edge:not([data-traced]) {
-  opacity: var(--erd-dim-opacity);
+/* Untraced boxes AND untraced edges are both dimmed by the scrim below, not by an opacity
+   of their own - see the note on `ViewportPortal` in Canvas.tsx for the measurements. Only
+   traced edges are lifted over it, which is why they need no rule here at all: they are
+   simply not behind the thing doing the dimming. */
+
+/* One composited layer between the untraced boxes and the traced ones.
+   The box is deliberately far larger than any diagram: it is in flow coordinates, inside
+   the transformed viewport, and the browser clips the paint to what is on screen. Sizing
+   it to the diagram bounds instead would mean recomputing those on every layout for no
+   gain. */
+.erd-scrim {
+  position: absolute;
+  left: -50000px;
+  top: -50000px;
+  width: 100000px;
+  height: 100000px;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--erd-paper);
+  opacity: 0;
+  transition: opacity var(--erd-trace-duration) ease-out;
 }
+
+.erd-canvas[data-tracing] .erd-scrim {
+  opacity: calc(1 - var(--erd-dim-opacity));
+}
+
 
 .erd-node[data-traced] {
   border-color: var(--erd-signal);
@@ -383,11 +406,13 @@
   stroke-width: var(--erd-stroke-trace);
 }
 
-/* A dimmed connector keeps more presence than a dimmed box: lines are thin to begin
-   with, so the same opacity erases them faster. */
-.erd-canvas[data-tracing] .erd-edge:not([data-traced]) {
-  opacity: calc(var(--erd-dim-opacity) + 0.15);
-}
+/* An untraced connector used to keep more presence than a dimmed box
+   (`--erd-dim-opacity` + 0.15), on the grounds that lines are thin to begin with so the
+   same opacity erases them faster. It cannot any more: it is dimmed by sitting BEHIND the
+   scrim, and an element behind a wash cannot be made to show through more than the wash
+   allows. Restoring the rule here would dim it twice over.
+   The alternative was lifting the whole edge layer above the scrim, which was built and
+   looked wrong - see the note in Canvas.tsx. */
 
 /* A dimmed connector also drops its label, which used to be done by not rendering it.
    Hiding it here instead means an untraced edge keeps the same `data` object while
