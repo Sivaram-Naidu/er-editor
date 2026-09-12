@@ -53,16 +53,31 @@ export function traceSets(
   diagram: Diagram,
   hoveredEntityId: EntityId | undefined,
   hoveredRelationshipId: RelationshipId | undefined,
+  pinnedRelationshipId: RelationshipId | undefined,
 ): TraceSets {
-  if (hoveredRelationshipId !== undefined) {
+  /*
+   * A PINNED TRACE OUTRANKS THE POINTER, and that is the requirement rather than an
+   * opinion. FR-4.4 exists so you can pan while tracing, and on a schema larger than one
+   * screen that is the only way to follow a connector to its far end. If hover could
+   * override it the feature would fail at exactly the moment it is meant to work: a
+   * trackpad pan scrolls the diagram UNDER a stationary pointer, so box after box fires
+   * `mouseenter` and the trace the user pinned would be replaced by whatever slid beneath
+   * the cursor. (A drag-pan happens to be safe — the pane takes pointer capture — which is
+   * precisely the sort of difference that makes "it worked when I tried it" untrustworthy.)
+   *
+   * Dismissing it needs no new mechanism: the pin IS the relationship selection, so Escape
+   * and a click on empty canvas already clear it, both through `selectEntities([])`.
+   */
+  const relationshipId = pinnedRelationshipId ?? hoveredRelationshipId
+  if (relationshipId !== undefined) {
     const relationship = diagram.relationships.find(
-      (candidate) => candidate.id === hoveredRelationshipId,
+      (candidate) => candidate.id === relationshipId,
     )
     return {
       entities: new Set(
         relationship?.participants.map((participant) => participant.entityId) ?? [],
       ),
-      relationships: new Set([hoveredRelationshipId]),
+      relationships: new Set([relationshipId]),
     }
   }
 

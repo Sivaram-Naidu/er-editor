@@ -53,7 +53,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
     // nothing matches the dimming rule and the resting diagram renders at full strength
     // rather than uniformly faded.
     const { diagram } = chain()
-    const traced = traceSets(diagram, undefined, undefined)
+    const traced = traceSets(diagram, undefined, undefined, undefined)
 
     expect(traced.entities.size).toBe(0)
     expect(traced.relationships.size).toBe(0)
@@ -61,7 +61,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
 
   it('hovering an entity traces it and everything one hop out', () => {
     const { diagram, a, b, c } = chain()
-    const traced = traceSets(diagram, b.id, undefined)
+    const traced = traceSets(diagram, b.id, undefined, undefined)
 
     expect(traced.entities.has(a.id)).toBe(true)
     expect(traced.entities.has(b.id)).toBe(true)
@@ -71,7 +71,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
 
   it('stops at one hop', () => {
     const { diagram, a, c } = chain()
-    const traced = traceSets(diagram, a.id, undefined)
+    const traced = traceSets(diagram, a.id, undefined, undefined)
 
     expect(traced.entities.has(c.id)).toBe(false)
   })
@@ -79,7 +79,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
   it('hovering a relationship traces it and exactly its two endpoints', () => {
     const { diagram, a, b, c } = chain()
     const relationshipId = diagram.relationships[0]!.id
-    const traced = traceSets(diagram, undefined, relationshipId)
+    const traced = traceSets(diagram, undefined, relationshipId, undefined)
 
     expect([...traced.relationships]).toEqual([relationshipId])
     expect(traced.entities.has(a.id)).toBe(true)
@@ -92,7 +92,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
     // The connector is the more specific target, so it takes precedence.
     const { diagram, b } = chain()
     const relationshipId = diagram.relationships[0]!.id
-    const traced = traceSets(diagram, b.id, relationshipId)
+    const traced = traceSets(diagram, b.id, relationshipId, undefined)
 
     expect(traced.relationships.size).toBe(1)
   })
@@ -100,8 +100,45 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
   it('handles a hover on an element that has just been deleted', () => {
     const { diagram } = chain()
 
-    expect(traceSets(diagram, 'ent_gone' as EntityId, undefined).entities.size).toBe(0)
-    expect(traceSets(diagram, undefined, 'rel_gone' as RelationshipId).entities.size).toBe(0)
+    expect(traceSets(diagram, 'ent_gone' as EntityId, undefined, undefined).entities.size).toBe(0)
+    expect(traceSets(diagram, undefined, 'rel_gone' as RelationshipId, undefined).entities.size).toBe(0)
+  })
+
+  it('a pinned relationship keeps tracing with nothing hovered (FR-4.4)', () => {
+    // The point of the feature: the pointer has left, and the trace is still there.
+    const { diagram, a, b, c } = chain()
+    const relationshipId = diagram.relationships[0]!.id
+    const traced = traceSets(diagram, undefined, undefined, relationshipId)
+
+    expect([...traced.relationships]).toEqual([relationshipId])
+    expect(traced.entities.has(a.id)).toBe(true)
+    expect(traced.entities.has(b.id)).toBe(true)
+    expect(traced.entities.has(c.id)).toBe(false)
+  })
+
+  it('a pinned relationship outranks a hovered entity, and that is the requirement', () => {
+    /*
+     * If hover could override the pin, FR-4.4 would fail at the one thing it exists for.
+     * A trackpad pan scrolls the diagram UNDER a stationary pointer, so box after box
+     * fires `mouseenter` and the pinned trace would be replaced by whatever slid beneath
+     * the cursor mid-pan. A drag-pan happens to be safe because the pane takes pointer
+     * capture — which is exactly why this is asserted rather than tried by hand.
+     */
+    const { diagram, c } = chain()
+    const pinned = diagram.relationships[0]!.id
+    const traced = traceSets(diagram, c.id, undefined, pinned)
+
+    expect([...traced.relationships]).toEqual([pinned])
+    expect(traced.entities.has(c.id)).toBe(false)
+  })
+
+  it('a pinned relationship outranks a hovered one too', () => {
+    const { diagram } = chain()
+    const pinned = diagram.relationships[0]!.id
+    const hovered = diagram.relationships[1]!.id
+    const traced = traceSets(diagram, undefined, hovered, pinned)
+
+    expect([...traced.relationships]).toEqual([pinned])
   })
 
   it('traces a self-referencing relationship to a single entity', () => {
@@ -109,7 +146,7 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
     const self = createRelationship({ from: employee.id, to: employee.id })
     const diagram = createDiagram({ entities: [employee], relationships: [self] })
 
-    expect(traceSets(diagram, undefined, self.id).entities.size).toBe(1)
+    expect(traceSets(diagram, undefined, self.id, undefined).entities.size).toBe(1)
   })
 })
 

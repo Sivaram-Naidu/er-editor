@@ -158,9 +158,25 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
    */
   const [measured, setMeasured] = useState<Record<EntityId, Size>>({})
 
+  /**
+   * The pinned trace (FR-4.4), derived from the selection rather than stored beside it.
+   *
+   * Reusing the selection is what keeps this from being a feature: no new state, no second
+   * way to dismiss, and Escape and a pane click already do the right thing. Reduced to a
+   * SCALAR before it reaches the memo below on purpose — passing the Set would put a value
+   * that changes identity on every selection change into `traced`'s dependencies, and
+   * `tracedAttributesByEntity` is memoised on `traced`, so every selection render would
+   * hand each box a new set and redraw all of them. That is the defect NFR-1.3's guard in
+   * `tests/unit/render/redraw.test.tsx` exists to catch.
+   */
+  const pinnedRelationshipId =
+    props.selectedRelationshipIds.size === 1
+      ? [...props.selectedRelationshipIds][0]
+      : undefined
+
   const traced = useMemo(
-    () => traceSets(diagram, hoveredEntityId, hoveredRelationshipId),
-    [diagram, hoveredEntityId, hoveredRelationshipId],
+    () => traceSets(diagram, hoveredEntityId, hoveredRelationshipId, pinnedRelationshipId),
+    [diagram, hoveredEntityId, hoveredRelationshipId, pinnedRelationshipId],
   )
 
   const isTracing = traced.entities.size > 0 || traced.relationships.size > 0

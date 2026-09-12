@@ -372,3 +372,113 @@ test('the palette runs a command, not just a search (FR-9.2)', async ({ page }) 
 
   await expect(page.locator('.react-flow__node')).toHaveCount(before + 1)
 })
+
+test('clicking a connector pins the trace so you can pan while following it (FR-4.4)', async ({
+  page,
+}) => {
+  /*
+   * The highlight used to die the moment the pointer left, which defeats tracing on any
+   * schema bigger than one screen — you cannot follow a connector to a far end you have to
+   * scroll to reach.
+   *
+   * The pin IS the relationship selection, so there is no new state and no second way to
+   * dismiss it: Escape and a click on empty canvas already clear it.
+   */
+  await openSample(page)
+
+  const edge = page.locator('.react-flow__edge').first()
+  await edge.click()
+
+  // Two endpoints traced, and the connector itself.
+  await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
+  await expect(page.locator('.erd-canvas[data-tracing]')).toHaveCount(1)
+
+  // THE POINT: move the pointer somewhere with nothing under it. A hover trace would be
+  // gone by now.
+  await page.mouse.move(4, 400)
+  await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
+
+  /*
+   * And it survives the pointer crossing a DIFFERENT table, which a trackpad pan does
+   * constantly — the diagram scrolls under a stationary cursor, so box after box fires
+   * `mouseenter`. If hover could override the pin this is where it would break, and the
+   * count would still be 2 (a different 2), so the assertion is on the identity of the
+   * traced boxes rather than on how many there are.
+   */
+  const tracedNames = async (): Promise<string[]> =>
+    page
+      .locator('.erd-node[data-traced]')
+      .evaluateAll((nodes) =>
+        nodes.map((node) => node.querySelector('.erd-node__name')?.textContent ?? ''),
+      )
+
+  const pinned = await tracedNames()
+  expect(pinned).toHaveLength(2)
+
+  /*
+   * NOW PAN, which is the requirement in one gesture: FR-4.4 exists so you can follow a
+   * connector to a far end you have to scroll to reach. A drag on the pane, not a
+   * `waitForTimeout` and a hope — and several small steps, because a single `mouse.move`
+   * between down and up registers as nothing on this canvas.
+   */
+  await page.mouse.move(600, 700)
+  await page.mouse.down()
+  for (let step = 1; step <= 8; step++) await page.mouse.move(600 - step * 50, 700)
+  await page.mouse.up()
+
+  expect(await tracedNames(), 'panning dropped the pinned trace').toEqual(pinned)
+
+  /*
+   * And hovering a DIFFERENT table does not steal it — which a trackpad pan does
+   * constantly, scrolling the diagram under a stationary cursor so box after box fires
+   * `mouseenter`.
+   *
+   * The target is chosen by asking the browser which box is on top at that point rather
+   * than by name, and the pan above is what makes one available at all: the inspector
+   * panel is drawn OVER the canvas and it is open here, because the pin IS a selection, so
+   * before the pan BOTH untraced tables were behind it (measured: `ORDER_LINE` and
+   * `PRODUCT` both hit `erd-inspector__section`). That is Known broken 5, and without
+   * checking for it this test picks a covered box, no hover ever fires, and it passes
+   * without testing anything — verified by mutation.
+   */
+  const target = await page.evaluate((traced) => {
+    for (const node of document.querySelectorAll('.react-flow__node')) {
+      const name = node.querySelector('.erd-node__name')?.textContent ?? ''
+      if (traced.includes(name)) continue
+
+      const rect = node.getBoundingClientRect()
+      const x = rect.x + rect.width / 2
+      const y = rect.y + Math.min(6, rect.height / 3)
+      if (document.elementFromPoint(x, y)?.closest('.react-flow__node') === node) {
+        return { name, x, y }
+      }
+    }
+    return null
+  }, pinned)
+
+  expect(target, 'no untraced table is reachable even after panning').not.toBeNull()
+
+  await page.mouse.move(target!.x, target!.y)
+
+  // Asserted on WHICH boxes are traced, not how many: hovering a two-neighbour table would
+  // also give a count of 2, and a count assertion would sail straight past it.
+  await expect.poll(tracedNames).toEqual(pinned)
+
+  /*
+   * Escape dismisses the pin, through the selection it is derived from — and hover tracing
+   * comes straight back, because the pointer is still resting on that table. Asserting
+   * "nothing is traced" here was wrong and the run said so: three boxes were, which is the
+   * hovered one plus its two neighbours. That is the correct behaviour, and asserting the
+   * HANDOVER is worth more than asserting a zero — it says the pin outranked hover while it
+   * existed and stopped outranking it the moment it did not.
+   */
+  await page.keyboard.press('Escape')
+
+  await expect.poll(tracedNames).not.toEqual(pinned)
+  expect(await tracedNames()).toContain(target!.name)
+
+  // And with the pointer off every box, nothing is traced at all.
+  await page.mouse.move(4, 700)
+  await expect(page.locator('.erd-node[data-traced]')).toHaveCount(0)
+  await expect(page.locator('.erd-canvas[data-tracing]')).toHaveCount(0)
+})

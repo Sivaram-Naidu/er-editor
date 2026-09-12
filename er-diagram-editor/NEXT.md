@@ -274,6 +274,21 @@ e2e spec.
 | The preview is the thing that gets applied          | Both come from the same call to `mergeDiagrams`. A separately-derived description for display is how a preview starts lying about what the button does.                                                                                                |
 | The gate                                            | `pnpm verify` green: 774 unit tests in 35 files, 23 e2e specs, typecheck and lint clean.                                                                                                                                                               |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — sticky trace session)
+
+FR-4.4, Tier 3 item 1. A small change — the pin is derived from the selection rather than
+stored beside it — and again the useful part is what the mutants said about the spec.
+
+| Thing                                             | Evidence                                                                                                                                                                                                                                    |
+| ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clicking a connector pins its trace               | Two endpoints `data-traced`, canvas `data-tracing`, and it is **still there after the pointer moves to empty canvas** — where a hover trace is gone.                                                                                        |
+| It survives a real pan                            | An eight-step drag on the pane, and the traced set is identical after it. This is the requirement in one gesture: you cannot follow a connector to a far end you have to scroll to reach if scrolling drops the highlight.                   |
+| **A pinned trace outranks the pointer**           | Hovering a different table does not steal it. Asserted on WHICH boxes are traced, not how many — hovering a two-neighbour table also gives a count of 2, and a count assertion sails straight past it.                                       |
+| The e2e spec needed two rounds of mutation to bite | With a hovered entity allowed to override the pin, the first version **passed**. Cause: the obvious hover target sits behind the inspector, so no `mouseenter` ever fired. The second version asserts `elementFromPoint` first — and then found there was no reachable untraced table at all until the pan, which is Known broken 5 measured rather than recalled: `ORDER_LINE` and `PRODUCT` both hit `erd-inspector__section`. |
+| Escape is a handover, not a blank                 | Asserting "nothing traced" after Escape failed with 3 — correctly, because the pointer was resting on a table and hover resumed. The spec now asserts the handover (the traced set changes to the hovered table's neighbourhood) and only then, with the pointer clear of every box, that nothing is traced. Worth more than the zero it replaced. |
+| No new state, no second dismissal path            | The pin is `selectedRelationshipIds` when it holds exactly one. Reduced to a scalar before it reaches the `traced` memo on purpose: passing the Set would put an identity that changes on every selection into `tracedAttributesByEntity`'s dependencies and redraw every box on a selection render — the NFR-1.3 defect its own guard exists to catch.                      |
+| The gate                                          | `pnpm verify` green: 777 unit tests in 35 files, 24 e2e specs, typecheck and lint clean.                                                                                                                                                     |
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -351,9 +366,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 774 unit tests in 35 files, ~48s. Coverage 92.7% statements / 83.9% branches / 93.9%
+- 777 unit tests in 35 files, ~48s. Coverage 92.7% statements / 83.9% branches / 93.9%
   lines against an 80% gate.
-- **23 e2e specs in 3 files, ~53s, all passing.** No `test.fail()` markers left. `pnpm
+- **24 e2e specs in 3 files, ~52s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -499,10 +514,7 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
-   leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
-   than one screen.
-2. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+1. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.
