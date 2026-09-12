@@ -150,3 +150,29 @@ export async function importFile(page: Page, filename: string, content: string):
     await chooser
   ).setFiles({ name: filename, mimeType: 'text/plain', buffer: Buffer.from(content, 'utf8') })
 }
+
+/**
+ * Open a second file over the diagram already on screen and take the MERGE branch.
+ *
+ * Deliberately does not reload, unlike `importFile`. Two reasons, and the second one is the
+ * kind of thing that makes a test assert nothing while passing:
+ *
+ * 1. `addInitScript` is registered on the context, so the `showOpenFilePicker` deletion
+ *    `importFile` installed is still in force after it.
+ * 2. A reload here would race the app's IndexedDB restore. The dialog decides whether to
+ *    offer a merge at all by looking at the CURRENT diagram, so an empty canvas at that
+ *    instant silently takes the "open as a new document" branch — the merge button would
+ *    never appear, and a test that only counted boxes afterwards would still be green.
+ */
+export async function mergeFile(page: Page, filename: string, content: string): Promise<void> {
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Open file' }).click()
+  await page.getByRole('button', { name: 'Choose a file…' }).click()
+  await (
+    await chooser
+  ).setFiles({ name: filename, mimeType: 'text/plain', buffer: Buffer.from(content, 'utf8') })
+
+  // Proves the preview branch was taken; without it the next click could be a no-op.
+  await page.getByText('What this will do').waitFor()
+  await page.getByRole('button', { name: 'Merge into this diagram' }).click()
+}

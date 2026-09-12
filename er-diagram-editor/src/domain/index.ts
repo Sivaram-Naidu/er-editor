@@ -7,4 +7,5 @@
 export * from './model'
 export * from './commands'
 export * from './graph'
+export * from './merge'
 export * from './validation'

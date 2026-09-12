@@ -324,6 +324,15 @@ culling off.
   as easily as the assertion does**: the cold-click render-count guard in `redraw.test.tsx`
   passed with `tracedAttributesByEntity` deleted, because the three-box schema it started
   from has no foreign keys and that map stays empty without one. It builds its own FK now.
+  - **So does the INPUT.** The re-import e2e spec imported a file that only ADDED a table,
+    and passed with the merge's id mapping disabled — because a broken merge degenerates
+    into "keep every existing box, append the new one", which an add-only file cannot tell
+    apart from a correct merge. The fix was to the input, not the assertions: the second
+    file now also changes a column on a table that must not move. When testing a merge, a
+    diff, or anything else that reconciles two states, the input has to exercise every
+    branch of the reconciliation — add, change and remove — or the cheapest wrong
+    implementation passes. The unit suite caught this mutant on its own, which is the other
+    half of the lesson: know which layer is actually doing the guarding.
 - **An A/B run measured as one block per condition measures the run order, not the code.**
   Five CSS conditions swept forward made dimming look 70 ms expensive; the same sweep
   reversed put every condition within 30 ms of the others, and interleaving them one sample

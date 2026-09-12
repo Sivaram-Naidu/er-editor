@@ -1,6 +1,6 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
-import { entity, importFile, nodeTransforms, openSample } from './helpers'
+import { entity, importFile, mergeFile, nodeTransforms, openSample } from './helpers'
 
 /** Three tables in a chain: the shape a layered layout has an obvious answer for. */
 const CHAIN_SQL = `
@@ -168,4 +168,97 @@ test('IndexedDB is available in the real browser', async ({ page }) => {
 
   const available = await page.evaluate(() => typeof indexedDB !== 'undefined')
   expect(available).toBe(true)
+})
+
+/**
+ * The same chain, plus one table the diagram has never seen AND a new column on one it
+ * already has.
+ *
+ * The extra column is not decoration. Without it the spec cannot tell a real merge apart
+ * from "keep every existing box and append the new one", which is what a broken id mapping
+ * degenerates into — verified by mutation: with `mapEntityId` returning the incoming id the
+ * first version of this test still passed.
+ */
+const CHAIN_SQL_PLUS = `
+CREATE TABLE customers (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE
+);
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  status VARCHAR(32) NOT NULL
+);
+CREATE TABLE order_lines (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  quantity INTEGER NOT NULL
+);
+CREATE TABLE payments (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  amount INTEGER NOT NULL
+);
+`
+
+/** Every box's transform, keyed by the name on it — DOM order is not stable across a merge. */
+async function placements(page: Page): Promise<Record<string, string>> {
+  return page.locator('.react-flow__node').evaluateAll((nodes) =>
+    Object.fromEntries(
+      nodes.map((node) => [
+        node.querySelector('.erd-node__name')?.textContent?.trim() ?? '?',
+        (node as HTMLElement).style.transform,
+      ]),
+    ),
+  )
+}
+
+test('re-importing a schema keeps the layout and only places what is new', async ({ page }) => {
+  /*
+   * The feature that changes what the tool is. Import used to replace the document
+   * wholesale, so every position a user had arranged was thrown away the moment they opened
+   * an updated dump — which on a 120-table diagram is the only work worth anything.
+   *
+   * The assertion that matters is the EXACT transform of the tables that were already
+   * there. "Four boxes are on screen" would pass against a full re-import followed by a
+   * fresh auto-layout, which is precisely the behaviour being replaced.
+   */
+  await page.goto('/')
+  await importFile(page, 'chain.sql', CHAIN_SQL)
+  await expect(page.locator('.react-flow__node')).toHaveCount(3)
+
+  // Wait for the imported layout to land, or "unchanged" would mean "still on the grid".
+  await expect
+    .poll(async () => nodeTransforms(page), { timeout: 20_000 })
+    .not.toEqual(['translate(0px, 0px)', 'translate(280px, 0px)', 'translate(560px, 0px)'])
+
+  const before = await placements(page)
+  expect(Object.keys(before)).toHaveLength(3)
+
+  await mergeFile(page, 'chain-plus.sql', CHAIN_SQL_PLUS)
+
+  // Culling removes off-screen nodes from the DOM entirely, and the new table is placed
+  // clear of the existing ones — so frame the diagram before counting anything.
+  await page.locator('.react-flow__controls-fitview').click()
+  await expect(page.locator('.react-flow__node')).toHaveCount(4)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  // The table that CHANGED in the file shows its new column, at the position it already
+  // had. This is the half that separates a merge from an append.
+  await expect(entity(page, 'orders').getByText('status')).toBeVisible()
+
+  const after = await placements(page)
+
+  // Not one box moved.
+  for (const [name, transform] of Object.entries(before)) {
+    expect(after[name], `${name} moved`).toBe(transform)
+  }
+
+  // And the new one was placed, clear to the right rather than on top of anything.
+  const newcomer = Object.keys(after).find((name) => before[name] === undefined)
+  expect(newcomer, 'the new table is not on the canvas').toBeDefined()
+  const xOf = (transform: string): number =>
+    Number(/translate\(([-\d.]+)px/.exec(transform)?.[1] ?? NaN)
+  const rightmostBefore = Math.max(...Object.values(before).map(xOf))
+  expect(xOf(after[newcomer!]!)).toBeGreaterThan(rightmostBefore)
 })

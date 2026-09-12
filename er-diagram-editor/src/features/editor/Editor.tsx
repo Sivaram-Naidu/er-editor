@@ -6,6 +6,7 @@ import {
   addAttribute,
   addEntity,
   addRelationship,
+  applyMerge,
   createAttribute,
   createEntity,
   createRelationship,
@@ -567,7 +568,18 @@ export function Editor(): React.ReactElement {
 
       {activeDialog === 'import' ? (
         <ImportDialog
+          current={diagram}
           onClose={closeDialog}
+          onMerged={(result) => {
+            // Merging keeps the document, so the selection is only cleared because the
+            // entities it names may have just been removed by the merge.
+            selectEntities([])
+            execute(applyMerge(result))
+            closeDialog()
+            // Deliberately NO auto-layout. Re-running it would rearrange every box, which
+            // is the exact work this path exists to preserve; `mergeDiagrams` has already
+            // placed the new tables clear of the existing ones.
+          }}
           onImported={(imported, arrange) => {
             // Opens as a NEW document rather than replacing the current one, so the work
             // already on screen stays in the diagram list rather than being overwritten.

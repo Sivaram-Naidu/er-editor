@@ -30,6 +30,8 @@ export {
 
 export { applyLayout, moveEntities, setPinned } from './layout.commands'
 
+export { applyMerge } from './merge.commands'
+
 export {
   addRelationship,
   deleteRelationship,

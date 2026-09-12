@@ -255,6 +255,25 @@ Selection median at All fields:
 | The block figure is a median, deliberately               | First cut reported the worst of 25 samples and read 199 ms, which is an extreme-value statistic tracking background load. CLAUDE.md's "summarise with the WORST" rule is for the layout apply — once per run, sitting on `longtask`'s 50 ms floor — and does not transfer to 25 samples all well clear of it. |
 | Nothing regressed in the revert                          | `pnpm verify` green: 765 unit tests in 34 files, 22 e2e specs including the palette's, typecheck and lint clean. The revert restored the per-node dimming rule, the lighter dim on untraced connectors, and the pre-scrim hover assertions in `interaction.spec.ts`; the palette specs merged through it untouched. |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — re-import session)
+
+FR-6.9, the Tier 2 item. `pnpm test:e2e`, plus nine unit tests on the merge itself. The
+useful part of this session is what mutation testing said about the first version of the
+e2e spec.
+
+| Thing                                               | Evidence                                                                                                                                                                                                                                              |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The layout survives a re-import                     | Import a 3-table `.sql`, let ELK arrange it, then open a 4-table version over it and merge: the transform of **every pre-existing box is byte-identical**, and the new table lands clear to the right of them. Asserted per box by name, because DOM order is not stable across a merge. |
+| **The first version of that spec proved nothing**   | With `mapEntityId` mutated to return the incoming id — the core mechanism disabled — it still **passed**. A broken id map degenerates into "keep every existing box, append the new one", which is indistinguishable from a correct merge if all the file changes is to ADD a table. |
+| What fixed it                                       | The second file now also adds a column to an existing table, and the spec asserts that column is visible on the box that did not move. Re-run against the same mutant: **fails**. A merge and an append can finally be told apart.                     |
+| The same trap, one level down                       | The unit suite caught the mutant on its own (`unchanged` drops to 0, everything reports as `missing`) — so the e2e spec was the weak one, not the mechanism. Worth knowing which layer is actually doing the guarding.                                  |
+| Foreign keys survive, and the result still parses   | A hand-drawn table pointing into a re-imported one keeps its FK, because matched attributes keep their existing ids. Every merge test ends by parsing the merged document: referential integrity is enforced, so a dangling `foreignKey.attributeId` does not render oddly, it refuses to load. Mutating attribute-id preservation kills three tests. |
+| A dropped column clears the FK, and says so         | Re-import without the referenced column: the FK is cleared, `foreignKeysCleared` is 1, the preview reports it, and the document still parses.                                                                                                          |
+| Change detection was wrong, and a test caught it    | First cut compared entities BEFORE remapping foreign keys, so every table carrying one reported as changed on a re-import of an identical file. Moved after the remap.                                                                                 |
+| Re-importing the same file is a no-op               | No duplicated entities, no duplicated relationships — relationships match on remapped participants plus name. Without that, every re-import doubles every edge.                                                                                        |
+| The preview is the thing that gets applied          | Both come from the same call to `mergeDiagrams`. A separately-derived description for display is how a preview starts lying about what the button does.                                                                                                |
+| The gate                                            | `pnpm verify` green: 774 unit tests in 35 files, 23 e2e specs, typecheck and lint clean.                                                                                                                                                               |
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -285,9 +304,11 @@ Selection median at All fields:
    never to choose between
    two fixes.** For that, assert a mechanism — render counts, commits per gesture, whether
    a worker was created — the way `redraw.test.tsx` and the auto-layout spec do.
-4. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
-   arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
-   visible thing on this list, because the layout it throws away is finally a real one.
+4. **~~No re-sync.~~ Built 12 Sep 2026 (FR-6.9).** Opening a file over a diagram that
+   already has tables now offers a merge: match by name, keep every position, place only what
+   is new, and show what it will do before it does it. One undo step. Deleting tables the
+   file omits is opt-in and off by default. A renamed table reads as one added plus one
+   missing — see the SRS row for why that is the decision rather than a limitation.
 5. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
@@ -330,9 +351,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 765 unit tests in 34 files, ~46s. Coverage 92.3% statements / 84.1% branches / 93.7%
-  lines against an 80% gate. `features/search` 90.7% / 91.8%.
-- **22 e2e specs in 3 files, ~53s, all passing.** No `test.fail()` markers left. `pnpm
+- 774 unit tests in 35 files, ~48s. Coverage 92.7% statements / 83.9% branches / 93.9%
+  lines against an 80% gate.
+- **23 e2e specs in 3 files, ~53s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -462,26 +483,26 @@ Both sweeps, three pairs, same unchanged harness.
 
 ## Tier 2 — make it actually useful
 
-### 1. Re-import onto an existing diagram, preserving layout
+**Clear as of 12 Sep 2026.** The one item in it — re-import onto an existing diagram — is
+built and is FR-6.9. Import used to replace the document wholesale, so opening an updated
+dump threw away every position the user had arranged; it now matches by name, keeps the
+layout, places only what is new, and shows what it will do before doing it.
 
-The item that changes what the tool is. Import currently replaces the document wholesale.
-What is needed: import a `.sql` or `.mmd` over the _current_ diagram, match entities by
-name (importers regenerate ids, so name is the only join key), keep the positions of
-everything that still exists, place only genuinely new entities, and report what was added,
-removed and changed. One undo step.
-
-Worth designing properly. It needs a decision on what happens to a renamed table (which
-looks identical to a delete plus an add), and probably wants the diff shown before it is
-applied.
+The design decision the item asked for, taken and recorded: **a renamed table reads as one
+added plus one missing.** With the name as the only join key a rename is indistinguishable
+from a drop plus an add, and inferring it from column overlap would silently move the wrong
+box on the occasions it guessed wrong. Reporting both, in a preview, one undo step away, is
+the honest version. The diff the item wanted shown before applying is the preview itself,
+computed by the same pure function that then gets applied — not a second description of it.
 
 ## Tier 3 — the features that matter at 100+ tables
 
 In order:
 
-2. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+1. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-3. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+2. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.
