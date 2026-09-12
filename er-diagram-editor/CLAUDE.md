@@ -20,12 +20,21 @@ pnpm dev
 pnpm test          # unit only, ~55s on this machine
 pnpm test:coverage # enforces 80%; NOT part of verify — run it yourself
 pnpm test:perf     # layout budgets, slow, run when touching layout or measurement
-pnpm test:e2e      # 14 specs on the system Chrome, ~40s. No browser install needed:
+pnpm test:perf:browser
+                   # NFR-1.3 / NFR-1.4 in Chrome against `vite preview`, ~2 min. Its own
+                   # playwright.perf.config.ts, because these MUST measure the production
+                   # build. Not in verify — wall-clock assertions are a command you run.
+pnpm test:e2e      # 16 specs on the system Chrome, ~40s. No browser install needed:
                    # playwright.config.ts sets `channel: 'chrome'`. Part of verify.
 ```
 
 `pnpm verify` must pass. Do not weaken a lint rule, a type, or a coverage threshold to
 make it pass — those have caught real bugs repeatedly (see "Things that have gone wrong").
+
+**Run git from the repository root, one level up.** There is a second, stale `.git` inside
+`er-diagram-editor/`, frozen at a single old commit. Git commands run from this directory
+talk to that one: `git status` claims almost everything is modified, and `git checkout --
+<file>` silently reverts a file to months-old content. `cd ..` first, or use `git -C`.
 
 ## Architecture, and the rule that enforces it
 
@@ -166,16 +175,215 @@ culling off.
   it installs itself as the worker body and exports nothing. `new ELK()` then throws
   `_Worker is not a constructor` at worker module top level. Auto-layout has therefore never
   worked in a browser, in dev or in production, while `pnpm test:perf` happily measured the
-  algorithm in-process on the test thread. Let elkjs own the thread instead: main-thread
-  `new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })` with
-  `elk-worker.min.js?url`, as a **classic** worker — it is a browserify UMD bundle, so
-  `{ type: 'module' }` will not load it. See `NEXT.md` Tier 1.
+  algorithm in-process on the test thread. **Fixed 10 Sep 2026** by letting elkjs own the
+  thread: `elk-api.js` on the main thread driving `elk-worker.min.js` — imported with
+  Vite's `?url` — as a **classic** worker. It is a browserify script, not an ES module, so
+  `{ type: 'module' }` will not load it; `workerUrl` alone is enough, because elk-api's
+  default factory is already `new Worker(url)`. `tests/unit/architecture/elk-entry-points.test.ts`
+  now fails if `elk.bundled.js` is imported from `src/` again — worth knowing that the
+  main-thread placement of it is the _silent_ failure, since it works by blocking the UI in
+  an in-process fake worker and would pass every test here. See ADR-0002 "Corrected".
+- **A hook that reads a prop, called in the same tick as the state change it should react
+  to.** `Editor.tsx` did `load(imported); autoLayout.run()`. `run` closes over the
+  `diagram` PROP, so it arranged the document being replaced — on a fresh session the empty
+  one, which `ElkLayoutEngine` short-circuits, so auto-layout on import was a silent no-op:
+  no worker, no error, no positions. The store was already correct; React had simply not
+  re-rendered yet. `run` now takes the document to arrange, and the caller passes it
+  explicitly. Anything that loads and then acts on what it loaded has this shape — pass the
+  value, do not re-read it.
 - **Playwright's `locator.click()` cannot catch a visibility bug**, because its actionability
   checks wait for the element to be visible before pressing. The 19 ms window above is
   politely waited out and the click passes. Interaction specs on this canvas use raw
   `mouse.move` / `down` / `up` with no pause between the move and the press — see
   `coldClick` in `tests/e2e/helpers.ts`. Related: `test.fail()` outside a test body marks
   every test in the file.
+- **Four ELK options that sound like they fix a wide layer and do nothing.** A table
+  referenced by forty others puts all forty at one dependency depth, and `layered` stacks a
+  depth into one column — 838x21134px, a ribbon unreadable at any zoom or detail level.
+  `elk.aspectRatio`, `elk.layered.wrapping.strategy`,
+  `elk.layered.highDegreeNodes.treatment` and `nodePlacement.strategy: NETWORK_SIMPLEX` all
+  produce **byte-identical** output on it — verified against a sanity check that
+  `elk.spacing.nodeNode` DOES change the output, so the options were reaching ELK.
+  `wrapping.strategy` is the trap: it wraps a long chain of LAYERS into rows, and the
+  problem is one layer with too many nodes IN it. The fix layers the graph ourselves and
+  hands ELK partitions — `src/layout/elk/wideLayers.ts`. Two halves of it are easy to lose:
+  - **`nodePlacement.strategy` must become `SIMPLE`, or partitioning buys almost nothing**
+    (21134 → 19125px). The default `BRANDES_KOEPF` aligns nodes with their edges to
+    straighten them, so it spreads the forty dependents back across the hub's whole edge
+    fan. Applied only when a split happens — straight edges are worth having otherwise.
+  - **Layer by dependency depth, not breadth-first distance from the hub.** BFS numbers a
+    dependency chain backwards, so the chain reads right-to-left while the rest of the
+    diagram reads left-to-right — the one thing ADR-0002 chose a layered algorithm for.
+    There is a test asserting a chain keeps its order.
+- **A test that feeds its own estimate back in cannot validate the estimate.**
+  `tests/unit/layout` had a spec named "produces no overlapping boxes" whose comment
+  claimed "if the measurements in measure.ts drift away from what canvas.css draws, this is
+  what catches it". It passed `measureAll` output to ELK and then checked for overlap using
+  _that same output_, so all it ever asserted was that ELK honoured the sizes it was given.
+  No unit test can do better here — jsdom performs no layout, so there is no rendered height
+  to disagree with. `tests/e2e/measurement.spec.ts` compares the estimate against
+  `offsetHeight` in Chrome, which is the only place the two can disagree.
+- **`measure.ts`'s constants have to be MEASURED, not read off canvas.css by eye.** The
+  previous set was wrong about the header (36 vs 38), the add-field row (24 vs 27), the "N
+  more" row (folded into the add row, actually 30), the border (uncounted, and 2px or 4px
+  depending on selection and validation state), and both width clamps (320/168 against a
+  stylesheet that says 300/160/120). Two related traps:
+  - **A flat per-row height under-measures at scale.** The true rate is ~27.37px, not 27,
+    because every row after the first adds a 1px rule to a 26.3px line box. A flat 27 looks
+    correct on a five-row table and under-measures a 60-column one by 22px — so the error
+    only appears on the wide tables real schemas have. `tests/fixtures/wide-names.sql` keeps
+    a 60-column table for exactly this, and there is a unit guard on the rate.
+  - **Bias every constant so the estimate comes out LARGE.** Too big spaces boxes slightly
+    further apart than needed; too small makes ELK stack them.
+- **`text-overflow: ellipsis` does nothing on a flex item without `min-width: 0`.** A flex
+  item's default `min-width: auto` refuses to shrink below its content, so the name overflows
+  the box and the ellipsis never appears. This is why rows can be pinned to one line at all,
+  and pinning them is what makes the flat row height in `measure.ts` true by construction
+  rather than by calibration — while a name could wrap, no fixed per-character width could
+  predict the height, because where a name breaks depends on its glyphs (measured 6.2 to
+  10.2 px per character on real column names) rather than on its length.
+- **React Flow passes a node's POSITION to the node component as a prop.** `NodeWrapper`
+  renders `<NodeComponent … positionAbsoluteX positionAbsoluteY …>`, so `memo(EntityNode)`
+  with the default comparison re-renders the whole box — header, every attribute row, every
+  badge, every per-row handle — whenever the box moves, even though the wrapper above it is
+  what applies the CSS transform. Free while one box is dragged; ruinous when a layout
+  lands and all of them move at once: 120 `EntityNode` and **1,920 `AttributeRow`** renders
+  for the 120-entity reference schema. `sameEntityNode` declines those two props and
+  compares everything else. For it to hold, `Canvas` must also keep the Set and the Map
+  inside `node.data` reference-stable across a move — both are memoised on
+  `diagram.entities`, not on `diagram`, because Immer's structural sharing means a
+  position-only command hands back the SAME entities array. `traceSets` returns a shared
+  `NOTHING_TRACED` for the same reason. The defect is invisible from either side: the
+  diagram renders identically, only the cost differs, so the test is on the pair
+  (`tests/unit/render/redraw.test.tsx`).
+- **`startTransition` cannot break up an update that comes from a Zustand store.** React
+  de-opts a transition containing a `useSyncExternalStore` read to synchronous rendering, to
+  avoid tearing — so wrapping `execute(applyLayout(…))` in `startTransition` time-slices
+  nothing. Measured, not assumed: identical block durations at 120 and 300 entities. Every
+  store here is Zustand, so this applies to all of them.
+- **Playwright's `mouse.move` then `mouse.down` is not a fast click, but HOW slow depends on
+  the gesture — measure the one you are measuring.** Each call is its own CDP round trip. A
+  bare `mouse.move` then `mouse.down`, which is what `perf.spec.ts` sends, puts **47-51 ms**
+  between them; `coldClick` puts **248 ms** between its FIRST move and the press, because it
+  parks at (8, 8) and does a round-tripping `elementFromPoint` check before the real move
+  (65 ms from that last move). The 172 ms once recorded here was the second gesture, applied
+  to the first. Everything inferred from it — notably "`--erd-trace-duration` is 120 ms, so
+  the hover has finished transitioning before the press arrives" — was therefore unsupported:
+  at a 50 ms dwell the transition is a third done. Corrected 11 Sep 2026.
+- **The obvious outstanding work is not the cause just because it is outstanding.** A cold
+  click on this canvas lands with **164 CSS transitions still running** and costs 195 ms
+  against 41 ms for a warm one, which reads like an open-and-shut case. Disabling every
+  transition takes the count to **0** and the latency to **154 ms**. The real cost is the
+  style and layout the hover left pending, which the press's own handler flushes
+  synchronously — a `longtask` of 172 ms cold against no entry at all warm, with the press
+  doing an identical 4 `EntityNode` / 32 `AttributeRow` renders either way. Two separate
+  plausible stories about this one gesture have now died on contact with an ablation. Split
+  the latency at the DOM mutation (`pointerdown → class set` versus `class set → frame`)
+  before theorising: it says immediately whether you are looking at React, at the browser's
+  style and layout, or at the frame pipeline.
+- **`:has()` is the famously expensive selector, and on this canvas it is not what is
+  expensive.** `.react-flow__node:has(.erd-node[data-traced])` asks an invalidation question
+  about all 120 wrappers on every hover, which reads like an obvious cost. Both `:has()`
+  rules were removed and the z-index set from React as a class on the traced wrappers
+  instead, then measured against the pair restored as an ablation **in the same interleaved
+  run**: 196 ms against 200 ms, and 169 ms of blocked main thread against 175 ms. Reverted.
+  The lesson is not about `:has()` — it is that a reputation is not a measurement, and that
+  putting the OLD code back as an ablation condition is the only way to A/B a change on this
+  machine, where medians drift 80 ms between runs with nothing changed.
+- **A diagram-wide dim is one composited layer, not an opacity on every element.**
+  `.erd-canvas[data-tracing] .erd-node:not([data-traced])` set an opacity on all 111
+  untraced boxes, which at L2 repaints them and their ~1,900 rows; a cold click blocked for
+  ~170 ms and most of it was paint. `.erd-scrim` — one div, rendered through React Flow's
+  `ViewportPortal` — now does it by compositing, and lands on the ceiling that removing the
+  dimming outright defines. Three things make it work, and all three are easy to lose:
+  - **It has to be INSIDE the viewport.** `.react-flow__viewport` carries a transform, so it
+    is the only stacking context on the canvas; `.react-flow__edges` and `.react-flow__nodes`
+    are both `z-index: auto` and create none, which is why every edge and node wrapper
+    competes directly in it and one element can sit between untraced boxes (z 0) and traced
+    ones (z 5). Asked of the browser, not read off React Flow's stylesheet — and it is not a
+    contract, so check it again if React Flow's DOM changes.
+  - **Lift only the TRACED edges over it.** Lifting the whole `.react-flow__edges` layer was
+    built first and looked wrong in a way no assertion caught: every connector then drew on
+    top of every untraced table, so the diagram became a grid of lines crossing through
+    boxes. Found by looking at the screenshot.
+  - **An element behind a wash cannot show through more than the wash allows.** Untraced
+    connectors used to keep `--erd-dim-opacity + 0.15` so thin lines survived dimming. Under
+    a scrim that rule dims them twice; it is gone, and they now take the same dim as boxes.
+  - It stays MOUNTED and fades by CSS, because a mount per hover is a commit per hover —
+    which is the cost being removed. It never appears on the export surface, which passes no
+    hover state at all.
+- **A change that its own test cannot distinguish from its opposite is not a fix.** The
+  deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
+  assertion still passed with the scheduler's behaviour inverted, which is what exposed it.
+  Mutate the code and re-run the guard before believing it.
+- **An A/B run measured as one block per condition measures the run order, not the code.**
+  Five CSS conditions swept forward made dimming look 70 ms expensive; the same sweep
+  reversed put every condition within 30 ms of the others, and interleaving them one sample
+  at a time produced an ordering that contradicts itself (a superset override "costing"
+  167 ms more than the subset inside it). The noise floor for click latency here is around
+  100 ms. Size a problem with a stopwatch if you must; never choose between two fixes with
+  one. Assert a mechanism instead — render counts, commits per gesture, whether a worker
+  was created.
+- **A computed-style assertion against a TRANSITIONED property has to be polled.** Opacity
+  on `.erd-node` transitions over `--erd-trace-duration`, so reading `getComputedStyle`
+  straight after the hover lands mid-fade and reports ~1. It failed three runs out of three
+  while a screenshot plainly showed two dimmed boxes. `expect.poll`, not
+  `waitForTimeout` — a sleep passes today and rots when the duration changes.
+- **`EdgeLabelRenderer` is a portal, so no selector descending from the edge can style the
+  label.** It mounts the label into React Flow's own label layer, not inside the edge's
+  `<g>`. `.erd-edge[data-traced] .erd-edge__label` had therefore never applied once since
+  it was written, and a new rule to hide dimmed labels failed the same way — the labels
+  stayed on screen through a hover. Repeat the state on the label element itself. Found by
+  looking at a screenshot; both the unit suite and every DOM count were happy.
+- **React Flow keeps its OWN `selected` on the internal node, and only re-reads yours when
+  the node object's reference changes.** Reusing unchanged node objects across a render is
+  the right fix for hover — `adoptUserNodes` then keeps the internals instead of rebuilding
+  them — but applying it to a render where the SELECTION moved silently breaks controlled
+  selection. Shift is React Flow's marquee key, not its multi-select key, so it treats a
+  shift-click as a plain one and internally deselects everything else; this app treats it
+  as "add to the selection". While every node object was rebuilt every render, our value was
+  re-asserted constantly and the library's private opinion never survived a frame. Reuse
+  silences that, and a shift-clicked pair showed one highlight while the store held two —
+  the model right, only the view stale. `Canvas` therefore rebuilds every node on a
+  selection render on purpose. It cost nothing: a click with the pointer at rest is 25 ms
+  and 5 node renders at 120 entities, so selection was never where the saving was.
+- **One shared Set in `node.data` makes every node's data change whenever it does.**
+  `tracedAttributeIds` was one Set for the whole diagram, and `sameEntityNode` compares it
+  by reference on purpose (comparing contents would walk every attribute of every entity).
+  So a hover minted a new Set, every box answered "changed", and all 120 redrew every row —
+  hover median 90-99 ms against NFR-1.3's 100 ms. It is one set PER ENTITY now, absent for
+  entities with nothing traced so the shared empty Set keeps its identity. Any per-node
+  field derived from a diagram-wide fact has this shape.
+- **A per-element flag that expresses a diagram-wide fact is an O(N) state change.**
+  `isDimmed` was a boolean on every node and edge, so starting a hover rebuilt all N-1
+  elements that are NOT traced in order to say so. `data-tracing` on the canvas plus
+  `.erd-node:not([data-traced])` in CSS says the same thing with one attribute. Ask whether
+  the state belongs to the element or to the diagram.
+- **`longtask` has a 50 ms floor, so a reading of 0 is information and not a gap.** The
+  browser emits an entry only for a task that already exceeded the threshold, which is
+  exactly what NFR-1.4's clause asks about and is why the observer is the right instrument.
+  It also means readings near the threshold are bimodal — the same build, minutes apart,
+  gives `[0, 51, 0]` then `[57, 0, 0]`. Summarise with the WORST of several runs; a median
+  over values clustered on a detection threshold is noise.
+- **A latency probe that asks "has anything changed" measures the previous sample.** The
+  first version of `perf.spec.ts` asked whether ANY node was traced or selected, so each
+  sample had to clear the last one first — and the cheap way to do that, parking the pointer
+  at `(4, 4)` and clicking, presses whatever sits in the TOOLBAR's top-left corner rather
+  than hitting the canvas. Selection therefore stayed set between samples, the predicate was
+  already true when the probe armed, and it reported ~40 ms for something that takes ~120.
+  It looked like a good result. Anchor the predicate to the target element's own id, skip a
+  sample whose target is already in the state under test, and never assume a coordinate is
+  on the canvas just because it is near the edge.
+- **An interaction-latency sample has to start from an idle main thread.** Firing the next
+  gesture 60 ms after the last one charges the leftover render to the new input: the same
+  build measured hover at p95 44 ms with a settle and 148 ms without. Both numbers are real,
+  but only the first is what NFR-1.3 asks for. `settle()` waits for three consecutive
+  animation frames on schedule rather than guessing at a `waitForTimeout`.
+- **Measure performance against the production build, not `pnpm dev`.** NFR-1.4's
+  main-thread numbers sat in the SRS for a day as 323/142/473 ms; the same clicks against
+  `vite preview` gave 51/62/96 ms. React's development build — `jsxDEV`, prop validation,
+  StrictMode's double render — was most of what was being measured. Use `vite preview`, and
+  take the median of at least three runs: single runs on this canvas vary by ±20 ms.
 - **Three separate ways to ship a broken image export.** All three produced a file, none
   threw, and all three passed every check a unit test can make. See `docs/SRS.md` §13.1.
   - `useStore(s => s.nodesInitialized)` is a **stale flag**. React Flow recomputes it only

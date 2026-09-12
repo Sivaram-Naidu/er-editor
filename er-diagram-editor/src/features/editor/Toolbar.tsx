@@ -2,6 +2,8 @@
 
 import type { LodLevel } from '../../lib/lod'
 
+import { ThemeToggle } from './ThemeToggle'
+
 export interface ToolbarProps {
   canUndo: boolean
   canRedo: boolean
@@ -14,6 +16,8 @@ export interface ToolbarProps {
   lod: LodLevel
   lodOverride: LodLevel | undefined
   isDirty: boolean
+  /** Set when the last autosave failed; replaces the save indicator with the reason. */
+  saveError: string | undefined
   onAddEntity: () => void
   onAddRelationship: () => void
   onDeleteSelection: () => void
@@ -25,6 +29,14 @@ export interface ToolbarProps {
   onImport: () => void
   /** Rendered by the editor, which owns the diagram library. */
   diagramMenu: React.ReactNode
+  /**
+   * The issues button and its badge (FR-8.4).
+   *
+   * A node rather than a count plus a handler, for the same reason as `diagramMenu`: the
+   * toolbar's job is to find somewhere to put this, not to know what a validation report
+   * is.
+   */
+  validationToggle: React.ReactNode
   isLayingOut: boolean
   layoutError: string | undefined
 }
@@ -141,6 +153,12 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
         </label>
       </div>
 
+      <div className="erd-toolbar__group">
+        <ThemeToggle />
+      </div>
+
+      <div className="erd-toolbar__group">{props.validationToggle}</div>
+
       <div className="erd-toolbar__group erd-toolbar__group--end">
         <span className="erd-status">
           {props.entityCount} {props.entityCount === 1 ? 'entity' : 'entities'} · showing{' '}
@@ -151,9 +169,18 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
             {props.layoutError}
           </span>
         )}
-        <span className="erd-status" data-dirty={props.isDirty || undefined}>
-          {props.isDirty ? 'Saving…' : 'Saved'}
-        </span>
+        {/* The failure replaces the indicator rather than sitting beside it. "Saving…"
+            next to "could not save" reads as a transient hiccup, which is the one
+            impression that must not be given here. */}
+        {props.saveError === undefined ? (
+          <span className="erd-status" data-dirty={props.isDirty || undefined}>
+            {props.isDirty ? 'Saving…' : 'Saved'}
+          </span>
+        ) : (
+          <span className="erd-status erd-status--error" role="alert" title={props.saveError}>
+            Not saved — {props.saveError}
+          </span>
+        )}
       </div>
     </header>
   )

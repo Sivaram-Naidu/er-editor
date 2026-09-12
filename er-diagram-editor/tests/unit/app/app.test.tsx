@@ -1,3 +1,9 @@
+/**
+ * @vitest-environment jsdom
+ *
+ * Mounts the whole app shell, so it needs a DOM. The suite default is `node` (see the note in vite.config.ts), so a file that
+ * mounts anything has to opt back up here.
+ */
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 

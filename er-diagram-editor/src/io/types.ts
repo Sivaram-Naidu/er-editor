@@ -64,13 +64,40 @@ export interface ExportResult {
   lossReport: LossItem[]
 }
 
-export interface ExportAdapter {
+/** Common to every adapter the export dialog can offer, text or image. */
+export interface ExportAdapterInfo {
   id: string
   label: string
   extension: string
   mimeType: string
   capabilities: CapabilitySet
+  /**
+   * A caveat about the FORMAT rather than about any element in the diagram.
+   *
+   * The loss report is derived per element by comparing usage against `capabilities`, so
+   * it can only say things of the form "this entity loses that". A format-level fact —
+   * "an image cannot be read back in" — has no element to hang off, and putting it on an
+   * arbitrary one would be worse than not saying it. Optional; most formats have nothing
+   * to add.
+   */
+  note?: string
+}
+
+export interface ExportAdapter extends ExportAdapterInfo {
   export(diagram: Diagram): ExportResult
+}
+
+/**
+ * An adapter that writes a picture of the canvas rather than a description of the model.
+ *
+ * Deliberately NOT an `ExportAdapter`. Its input is a rendered DOM subtree, not a
+ * `Diagram` — see the header of `formats/image/export.ts` for why that difference is real
+ * and not worth papering over with a union type. The two live in separate registry lists
+ * so that `exportAdapters` stays a list of things you can call `export(diagram)` on.
+ */
+export interface ImageExportAdapter extends ExportAdapterInfo {
+  /** Which renderer path to take; the rest of the adapter is metadata. */
+  format: 'png' | 'svg'
 }
 
 export interface ImportResult {

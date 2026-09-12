@@ -83,7 +83,12 @@ export function InlineName(props: InlineNameProps): React.ReactElement {
       className={props.className}
       role="button"
       tabIndex={0}
-      title="Double-click to rename"
+      /* The name itself, because `.erd-attr__name` now clips to one line and a long
+         column name is not fully readable on the canvas. The rename hint rides along
+         rather than replacing it — the tooltip is the only place the whole name exists. */
+      title={
+        props.value === '' ? 'Double-click to rename' : `${props.value}\nDouble-click to rename`
+      }
       onDoubleClick={() => {
         setEditing(true)
       }}

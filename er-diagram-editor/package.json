@@ -17,7 +17,8 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "verify": "pnpm typecheck && pnpm lint && pnpm test && pnpm build && pnpm test:e2e",
-    "test:perf": "vitest run --config vitest.perf.config.ts"
+    "test:perf": "vitest run --config vitest.perf.config.ts",
+    "test:perf:browser": "playwright test --config playwright.perf.config.ts"
   },
   "dependencies": {
     "@xyflow/react": "^12.11.6",

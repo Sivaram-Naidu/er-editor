@@ -39,7 +39,16 @@ export interface TraceSets {
  *
  * Returning empty sets when nothing is hovered is load-bearing: `isDimmed` is then false
  * everywhere, so the diagram renders at full strength rather than uniformly faded.
+ *
+ * That answer is a SHARED constant rather than a fresh pair of Sets, and the identity is
+ * load-bearing too. Canvas memoises this on the whole `Diagram`, which is a new object
+ * after any edit including a pure move, so a fresh empty pair would travel into every
+ * node's `data` and defeat the comparison in `sameEntityNode` — re-rendering all 120
+ * boxes and their rows whenever a layout lands. Nothing hovered is always the same
+ * nothing.
  */
+const NOTHING_TRACED: TraceSets = { entities: new Set(), relationships: new Set() }
+
 export function traceSets(
   diagram: Diagram,
   hoveredEntityId: EntityId | undefined,
@@ -62,7 +71,7 @@ export function traceSets(
     return { entities: neighbourhood.entityIds, relationships: neighbourhood.relationshipIds }
   }
 
-  return { entities: new Set(), relationships: new Set() }
+  return NOTHING_TRACED
 }
 
 export function fallbackPosition(index: number): Point {
@@ -236,4 +245,105 @@ export function overlayNodes<T extends Node>(
       ...(size === undefined ? {} : { measured: size }),
     }
   })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REACT FLOW RE-ADOPTS BY REFERENCE, SO HANDING IT THE SAME OBJECT IS THE FIX
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `adoptUserNodes` keeps a node's internals only when the incoming object IS the object
+// it was given last time. Every rebuild of the node array therefore costs an adopt per
+// node and a wrapper render per node, whether or not anything about that node changed —
+// and `Canvas` rebuilds the whole array on every hover and every click, because
+// `baseNodes` depends on the trace sets and on the selection.
+//
+// Measured on the production build at 120 entities, before this: hover p95 83–195 ms and
+// selection p95 147–162 ms, against NFR-1.3's 100 ms. Neither is the node BODY redrawing
+// — `sameEntityNode` already stops that — it is 120 new objects per pointer event.
+//
+// So the array is still rebuilt, which is cheap, and then every node that came out
+// equivalent to the one React Flow already holds is swapped back for that exact object.
+// A hover then changes four node objects instead of a hundred and twenty.
+//
+// THIS HAS TO RUN LAST, after `overlayNodes`. The overlay reattaches `measured` to every
+// node that has a size, which is all of them once React Flow has measured, so comparing
+// before it would find every node different on every render and reuse nothing.
+
+/** Shallow equality over a node's `data`, which is a fresh object on every rebuild. */
+function sameData(previous: unknown, next: unknown): boolean {
+  if (Object.is(previous, next)) return true
+  if (typeof previous !== 'object' || typeof next !== 'object') return false
+  if (previous === null || next === null) return false
+
+  const before = previous as Record<string, unknown>
+  const after = next as Record<string, unknown>
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)])
+
+  for (const key of keys) {
+    if (!Object.is(before[key], after[key])) return false
+  }
+
+  return true
+}
+
+/**
+ * Is this node indistinguishable from the one React Flow already holds?
+ *
+ * Every own key is compared, so a field added to the node later cannot silently stop
+ * being noticed — the failure mode of a hand-maintained list. Two exceptions:
+ *
+ * `position` is compared by VALUE. `fallbackPosition` mints a fresh `{x, y}` on every
+ * render for any entity that has no position yet, so comparing it by reference would
+ * refuse to reuse exactly the nodes that never move.
+ *
+ * `data` is compared shallowly, because `Canvas` builds a new `data` object for every
+ * node on every render — it has to, since that object is where the node's draw state
+ * lives. Its fields are individually reference-stable by construction; that is what the
+ * memos in `Canvas` are for, and `sameEntityNode` relies on the same property.
+ */
+function sameNode<T extends Node>(previous: T, next: T): boolean {
+  const keys = new Set([...Object.keys(previous), ...Object.keys(next)])
+
+  for (const key of keys) {
+    if (key === 'data' || key === 'position') continue
+    const before = (previous as unknown as Record<string, unknown>)[key]
+    const after = (next as unknown as Record<string, unknown>)[key]
+    if (!Object.is(before, after)) return false
+  }
+
+  if (previous.position.x !== next.position.x || previous.position.y !== next.position.y) {
+    return false
+  }
+
+  return sameData(previous.data, next.data)
+}
+
+/**
+ * `next`, with every unchanged node replaced by the object from `previous`.
+ *
+ * Returns `previous` itself when nothing at all changed, so React Flow's `StoreUpdater`
+ * can skip the update entirely rather than re-adopting a hundred and twenty identical
+ * nodes — the array reference is what it watches.
+ */
+export function reuseUnchanged<T extends Node>(previous: readonly T[], next: readonly T[]): T[] {
+  // Runs on every render of Canvas, not only when the node array is rebuilt, so the case
+  // where nothing upstream changed at all is worth not walking.
+  if (previous === next) return previous as T[]
+  if (previous.length === 0) return [...next]
+
+  const held = new Map(previous.map((node) => [node.id, node]))
+  let reusedCount = 0
+
+  const merged = next.map((node) => {
+    const existing = held.get(node.id)
+    if (existing !== undefined && sameNode(existing, node)) {
+      reusedCount++
+      return existing
+    }
+    return node
+  })
+
+  return reusedCount === next.length && next.length === previous.length
+    ? (previous as T[])
+    : merged
 }

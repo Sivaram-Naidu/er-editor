@@ -7,14 +7,14 @@
 // It doubles as the answer to "what is this table connected to?", which at 100 tables is
 // not obvious from looking at the canvas.
 
-import type { Entity, Relationship, RelationshipId } from '../../domain'
+import type { Entity, EntityId, Relationship, RelationshipId } from '../../domain'
 
 import { Field } from './controls'
 
 export interface EntityRelationshipsProps {
   entity: Entity
   relationships: readonly Relationship[]
-  entityById: ReadonlyMap<string, Entity>
+  entityById: ReadonlyMap<EntityId, Entity>
   /** Every other entity, as connection candidates. */
   candidates: readonly Entity[]
   onSelectRelationship: (id: RelationshipId) => void
@@ -24,7 +24,7 @@ export interface EntityRelationshipsProps {
 function otherEndName(
   relationship: Relationship,
   entity: Entity,
-  entityById: ReadonlyMap<string, Entity>,
+  entityById: ReadonlyMap<EntityId, Entity>,
 ): string {
   const other = relationship.participants.find((participant) => participant.entityId !== entity.id)
   // Undefined means a self-join: both ends are this entity.

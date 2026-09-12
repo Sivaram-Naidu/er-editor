@@ -1,6 +1,23 @@
 import { expect, test } from '@playwright/test'
 
-import { entity, openSample } from './helpers'
+import { entity, importFile, nodeTransforms, openSample } from './helpers'
+
+/** Three tables in a chain: the shape a layered layout has an obvious answer for. */
+const CHAIN_SQL = `
+CREATE TABLE customers (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE
+);
+CREATE TABLE orders (
+  id SERIAL PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id)
+);
+CREATE TABLE order_lines (
+  id SERIAL PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  quantity INTEGER NOT NULL
+);
+`
 
 /**
  * Boot, connect, layout and storage. Pointer-level gestures live in `interaction.spec.ts`.
@@ -40,27 +57,19 @@ test('dragging from one table onto another creates a relationship', async ({ pag
   await expect(page.locator('.erd-edge')).toHaveCount(4)
 })
 
-/*
- * EXPECTED TO FAIL: auto-layout is broken in the browser. Not the spec — the feature.
- *
- * `elkjs/lib/elk.bundled.js` cannot run inside a Web Worker, and that is what
- * `src/layout/worker/layout.worker.ts` asks it to do. It throws
- * `_Worker is not a constructor` on construction, in dev and in the production build
- * alike, so the button does nothing and an imported schema stays on the placeholder grid.
- * Diagnosis and the recommended fix are in NEXT.md, Tier 1.
- *
- * Left as a failing-on-purpose spec rather than deleted or skipped: it is the proof, and
- * Playwright turns the suite red the moment it starts passing, which is the reminder to
- * drop this marker.
- */
 test('auto-layout rearranges the diagram without blocking the page', async ({ page }) => {
-  // Inside the body, not above it: `test.fail()` at file scope marks every test in the
-  // file, which turned the whole spec red the first time it was written this way.
-  test.fail()
-
   // The Worker and the dynamic elkjs import are browser-only, so this is the only place
-  // the wiring can be exercised. The layout algorithm itself is covered in unit tests.
+  // the wiring can be exercised — and for six stages nothing did, so it did not work at
+  // all. The layout algorithm itself is covered in unit tests; this covers that a click
+  // reaches ELK and the answer reaches the canvas.
   await openSample(page)
+
+  // Layout must happen off the main thread (NFR-1.4, FR-3.2). Asserting the worker is
+  // real is the only way to tell that apart from ELK running in-process: elkjs has an
+  // in-process fallback that would satisfy every other assertion here while blocking the
+  // UI on a 300-table schema.
+  const workers: string[] = []
+  page.on('worker', (worker) => workers.push(worker.url()))
 
   const customer = entity(page, 'CUSTOMER')
 
@@ -82,19 +91,74 @@ test('auto-layout rearranges the diagram without blocking the page', async ({ pa
   const displaced = await customer.boundingBox()
   expect(Math.round(displaced!.x)).not.toBe(Math.round(origin!.x))
 
+  // Nothing should have been downloaded yet — the engine is built on first use (NFR-1.8).
+  expect(workers, 'the layout worker was created before it was needed').toHaveLength(0)
+
   await page.getByRole('button', { name: 'Auto-layout' }).click()
 
   // The button returns to its resting label once the worker replies.
   await expect(page.getByRole('button', { name: 'Auto-layout' })).toBeEnabled({ timeout: 20_000 })
+  // `role="alert"` is where a layout failure surfaces, so this is the assertion that
+  // would have caught `_Worker is not a constructor` — the whole reason this spec exists.
   await expect(page.getByRole('alert')).toHaveCount(0)
 
   await expect
     .poll(async () => Math.round((await customer.boundingBox())!.x), { timeout: 10_000 })
     .not.toBe(Math.round(displaced!.x))
 
-  // One undo step for the whole rearrangement (FR-3.4).
-  await page.getByRole('button', { name: 'Undo' }).click()
-  await expect(customer).toHaveCount(1)
+  expect(workers, 'layout did not run in a worker').toHaveLength(1)
+  expect(workers[0]).toContain('elk-worker')
+
+  // One undo step for the whole rearrangement (FR-3.4), and it says what it undoes.
+  await expect(page.getByRole('button', { name: /Undo/ })).toHaveAttribute(
+    'title',
+    'Undo Auto-layout',
+  )
+  await page.getByRole('button', { name: /Undo/ }).click()
+  await expect
+    .poll(async () => Math.round((await customer.boundingBox())!.x), { timeout: 5_000 })
+    .toBe(Math.round(displaced!.x))
+})
+
+test('importing a SQL schema arranges it instead of leaving it on the grid', async ({ page }) => {
+  /*
+   * "SQL DDL to auto-layout in one click" is the product's strongest path, and both halves
+   * of it were broken. The second half was not the elkjs wiring: `autoLayout.run()` read
+   * the `diagram` PROP, which on the render that triggered the import is still the
+   * document being replaced. On a fresh session that is the empty one, so the engine
+   * short-circuited it and returned nothing — no worker, no error, no layout.
+   *
+   * Hence the assertion is against the placeholder grid specifically. `fallbackPosition`
+   * lays unpositioned entities out at 280px intervals on one row, and a left-to-right
+   * layered layout of a three-table chain looks similar enough at a glance that only the
+   * exact coordinates tell them apart.
+   */
+  const workers: string[] = []
+  page.on('worker', (worker) => workers.push(worker.url()))
+
+  await page.goto('/')
+  await expect(page.getByRole('button', { name: 'Open the sample schema' })).toBeVisible()
+
+  await importFile(page, 'chain.sql', CHAIN_SQL)
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(3)
+  await expect(page.getByRole('alert')).toHaveCount(0)
+
+  // Positions are read off the node transform, which is in diagram units — the bounding
+  // box is in screen pixels and moves with fitView, so it cannot be compared to a grid.
+  await expect
+    .poll(async () => nodeTransforms(page), { timeout: 20_000 })
+    .not.toEqual(['translate(0px, 0px)', 'translate(280px, 0px)', 'translate(560px, 0px)'])
+
+  expect(workers, 'the import did not run layout in a worker').toHaveLength(1)
+
+  // A layered layout of a chain puts each table right of the last, and ELK's own spacing
+  // is not a multiple of the 280px grid.
+  const xs = (await nodeTransforms(page)).map((transform) =>
+    Number(/translate\(([-\d.]+)px/.exec(transform)?.[1] ?? NaN),
+  )
+  expect(xs[0]).toBeLessThan(xs[1]!)
+  expect(xs[1]).toBeLessThan(xs[2]!)
 })
 
 test('IndexedDB is available in the real browser', async ({ page }) => {

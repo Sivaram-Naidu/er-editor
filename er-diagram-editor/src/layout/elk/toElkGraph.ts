@@ -4,11 +4,14 @@ import type { Diagram, EntityId } from '../../domain'
 import type { LayoutAlgorithm, LayoutRequest } from '../LayoutEngine'
 
 import { optionsFor } from './options'
+import { splitWideLayers } from './wideLayers'
 
 export interface ElkNode {
   id: string
   width: number
   height: number
+  /** Per-node options. Only used to carry a partition index — see `wideLayers.ts`. */
+  layoutOptions?: Record<string, string>
 }
 
 export interface ElkEdge {
@@ -60,10 +63,32 @@ export function toElkGraph(request: LayoutRequest): ElkGraph {
     return [{ id: relationship.id, sources: [from.entityId], targets: [to.entityId] }]
   })
 
+  /*
+   * A table referenced by forty others puts all forty at the same dependency depth, and
+   * `layered` stacks a depth into one column — a 21,000px ribbon. Splitting the crowded
+   * depth into several partitions is what turns that into a block; `wideLayers.ts` explains
+   * why none of ELK's own options do it, and returns an empty map when no layer is
+   * crowded, so an ordinary schema is untouched.
+   */
+  const partitions = splitWideLayers(
+    children.map((child) => child.id),
+    edges,
+  )
+
+  const partitioned =
+    partitions.size === 0
+      ? children
+      : children.map((child) => {
+          const partition = partitions.get(child.id)
+          return partition === undefined
+            ? child
+            : { ...child, layoutOptions: { 'elk.partitioning.partition': String(partition) } }
+        })
+
   return {
     id: 'root',
-    layoutOptions: optionsFor(request.algorithm ?? 'layered'),
-    children,
+    layoutOptions: optionsFor(request.algorithm ?? 'layered', partitions.size > 0),
+    children: partitioned,
     edges,
   }
 }

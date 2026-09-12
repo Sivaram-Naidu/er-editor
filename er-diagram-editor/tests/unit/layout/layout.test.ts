@@ -68,13 +68,42 @@ describe('measurement', () => {
     expect(measureEntity(entity, 1).height).toBeLessThan(measureEntity(entity, 2).height)
   })
 
-  it('widens for longer names, within bounds', () => {
+  it('clamps width to exactly the bounds canvas.css draws', () => {
+    // These are not approximations to be loosened when they fail: `.erd-node` sets
+    // `min-width: 160px; max-width: 300px`, with `min-width: 120px` at L0. Both clamps are
+    // exact, so assert the values rather than an inequality — the previous version of this
+    // test asserted `>= 160` at L0 and passed only because `measure.ts` had a single
+    // 168px floor that did not match the stylesheet at any level.
     const short = createEntity({ name: 'A' })
-    const long = createEntity({ name: 'A_VERY_LONG_TABLE_NAME_INDEED_YES' })
+    const long = createEntity({ name: 'a_very_long_table_name_that_runs_well_past_the_cap' })
 
     expect(measureEntity(long, 0).width).toBeGreaterThan(measureEntity(short, 0).width)
-    expect(measureEntity(long, 0).width).toBeLessThanOrEqual(300)
-    expect(measureEntity(short, 0).width).toBeGreaterThanOrEqual(160)
+    expect(measureEntity(short, 0).width).toBe(120)
+    expect(measureEntity(short, 2).width).toBe(160)
+    expect(measureEntity(long, 2).width).toBe(300)
+  })
+
+  it('bills a row above the measured rate, so wide tables never under-measure', () => {
+    /*
+     * The per-row rate creeps up with the row count, because every row after the first adds
+     * a 1px rule on top of a 26.3px line box: `.erd-node__attrs` measured 136px at 5 rows
+     * and 1642px at 60, i.e. 27.2 to 27.37px per row.
+     *
+     * A flat 27 looks right on a five-row table and under-measures a 60-column one by 22px.
+     * Under-measuring is the direction that makes ELK stack boxes, and it would only ever
+     * have shown up on the wide tables real schemas actually have — which is why this
+     * asserts the rate rather than comparing two heights loosely.
+     */
+    const rows = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        createAttribute({ name: `field_${String(index)}` }),
+      )
+    const wide = createEntity({ name: 'WIDE', attributes: rows(60) })
+    const bare = createEntity({ name: 'WIDE' })
+
+    const perRow = (measureEntity(wide, 2).height - measureEntity(bare, 2).height) / 60
+
+    expect(perRow).toBeGreaterThanOrEqual(27.37)
   })
 
   it('measures every entity in the diagram', () => {
@@ -221,6 +250,67 @@ describe('against the real ELK library', () => {
     }
     return new ELK().layout(graph)
   }
+
+  /**
+   * THE TEST THAT WOULD HAVE CAUGHT THE RIBBON.
+   *
+   * One table referenced by forty others puts all forty at the same dependency depth, and
+   * `layered` stacks a depth into one column. Every other spec in this file passes on that
+   * layout: there are no overlaps, every entity has a position, the chain reads left to
+   * right. It is simply 838px wide and 21,134px tall — a ribbon nobody can read at any zoom
+   * or any detail level. What no assertion here looked at was the SHAPE of the result.
+   *
+   * `splitWideLayers` fixes it by splitting the crowded depth into partitions, which is a
+   * property of `toElkGraph` plus ELK together — neither half is wrong on its own, so the
+   * test belongs on the pair.
+   */
+  it('lays a hub out as a block rather than a 21,000px ribbon', async () => {
+    const spokes = Array.from({ length: 40 }, (_, index) =>
+      createEntity({
+        name: `SPOKE_${String(index)}`,
+        attributes: Array.from({ length: 8 }, (_, field) =>
+          createAttribute({ name: `field_${String(field)}`, dataType: 'varchar(255)' }),
+        ),
+      }),
+    )
+    const hub = createEntity({
+      name: 'HUB',
+      attributes: Array.from({ length: 20 }, (_, field) =>
+        createAttribute({ name: `hub_field_${String(field)}`, dataType: 'varchar(255)' }),
+      ),
+    })
+    const diagram = createDiagram({
+      entities: [...spokes, hub],
+      relationships: spokes.map((spoke) => createRelationship({ from: spoke.id, to: hub.id })),
+    })
+
+    const sizes = measureAll(diagram, 2)
+    const result = fromElkGraph(
+      (await runElk(toElkGraph({ diagram, sizes }))) as Parameters<typeof fromElkGraph>[0],
+    )
+
+    const boxes = Object.entries(result.positions).map(([id, point]) => ({
+      x: point.x,
+      y: point.y,
+      width: sizes[id as EntityId]?.width ?? 0,
+      height: sizes[id as EntityId]?.height ?? 0,
+    }))
+    const width =
+      Math.max(...boxes.map((box) => box.x + box.width)) - Math.min(...boxes.map((box) => box.x))
+    const height =
+      Math.max(...boxes.map((box) => box.y + box.height)) - Math.min(...boxes.map((box) => box.y))
+
+    /*
+     * A generous band, on purpose: the exact numbers move with the type scale and with ELK
+     * versions, and this is a guard against a pathological shape rather than a pixel
+     * assertion. Before the fix this came out at 0.04, and a screen is about 1.6.
+     */
+    expect(
+      width / height,
+      `${String(Math.round(width))}x${String(Math.round(height))}`,
+    ).toBeGreaterThan(0.25)
+    expect(height, 'taller than any screen can show at a readable zoom').toBeLessThan(9_000)
+  }, 30_000)
 
   it('accepts our graph and returns a position for every entity', async () => {
     const { diagram, entities } = chain(6)

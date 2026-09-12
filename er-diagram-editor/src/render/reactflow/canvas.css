@@ -58,17 +58,52 @@
   border-bottom: none;
 }
 
+/* One line, always — see the note on `.erd-attr__name`. The header is measured as a
+   fixed `headerHeight` in measure.ts for the same reason a row is. */
 .erd-node__name {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--erd-ink);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .erd-node__kind {
   font-size: var(--erd-text-xs);
   color: var(--erd-ink-muted);
   flex-shrink: 0;
+}
+
+/* ── Validation markers (FR-8.4) ──────────────────────────────────────────── */
+
+/* The glyph on the box header. Small, and set in the severity colour, but the glyph and
+ * the visually-hidden word carry the meaning — colour alone never does (NFR-4.4).
+ *
+ * Deliberately NOT a border or fill change on the node. The traced-path highlight
+ * already owns the border and the elevation (FR-4.1), and a second treatment competing
+ * for the same channel would make a hovered-and-invalid table unreadable. */
+.erd-node__issue {
+  flex-shrink: 0;
+  width: 1.15em;
+  height: 1.15em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: var(--erd-text-xs);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--erd-paper);
+}
+
+.erd-node__issue[data-severity='error'] {
+  background: var(--erd-danger);
+}
+
+.erd-node__issue[data-severity='warning'] {
+  background: var(--erd-warning);
 }
 
 .erd-node__attrs {
@@ -97,9 +132,36 @@
   border-top: 1px solid color-mix(in srgb, var(--erd-rule) 45%, transparent);
 }
 
+/*
+ * ONE LINE PER ROW, AND IT IS LOAD-BEARING RATHER THAN COSMETIC
+ *
+ * This was `overflow-wrap: anywhere`, which let a long column name wrap to two or three
+ * lines. ELK positions boxes from `measure.ts`'s estimate, and that estimate bills every
+ * row at a flat `rowHeight` because measuring the real DOM would cost a synchronous
+ * reflow over every node (see the header of measure.ts). A wrapped row is 47-48px against
+ * the 26px billed, so ELK was told boxes were shorter than they are and stacked them: 26
+ * overlapping pairs on a 41-table schema, the worst box under-measured by 586px.
+ *
+ * The reason this is fixed here rather than by teaching the estimate to wrap: where a name
+ * breaks depends on its glyphs, not its length. Six real column names measured between 6.2
+ * and 10.2 px per character, and `measure.ts` has one `charWidth` to work with. A fixed
+ * per-character width would under-predict some rows, and under-predicting is the direction
+ * that overlaps. Pinning the row to one line makes the flat `rowHeight` correct by
+ * construction on every platform and font instead of by calibration.
+ *
+ * `min-width: 0` is the part that is easy to miss: without it the name is a flex item that
+ * refuses to shrink below its content, so it overflows the box and `text-overflow` never
+ * gets a chance to fire.
+ *
+ * The cost is that a long name is only fully readable on hover, which is why the `title`
+ * carries it — see `InlineName` and `AttributeRow`.
+ */
 .erd-attr__name {
+  min-width: 0;
+  overflow: hidden;
   color: var(--erd-ink);
-  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Primary key: underlined, the standard ER cue. Survives greyscale (NFR-4.4). */
@@ -234,6 +296,23 @@
   stroke-dasharray: 5 3;
 }
 
+/* A connector with an issue takes the severity colour (FR-8.4).
+ *
+ * Colour is the only channel available here — a badge on a line clutters the thing the
+ * line exists to keep readable, and the stroke weight and dash pattern are already spoken
+ * for by tracing and by identifying-vs-not. It is not the only cue for the issue itself,
+ * though: every one of these also appears in the panel as a sentence (NFR-4.4).
+ *
+ * The traced state wins, because it is a direct response to where the pointer is and has
+ * to stay legible; the marker is ambient. Hence the :not() rather than source order. */
+.erd-edge[data-issue='error']:not([data-traced]) .react-flow__edge-path {
+  stroke: var(--erd-danger);
+}
+
+.erd-edge[data-issue='warning']:not([data-traced]) .react-flow__edge-path {
+  stroke: var(--erd-warning);
+}
+
 /* A wide invisible stroke over the visible one. Hovering a 1.25px line is unreasonably
    fiddly; this gives the pointer a ~16px target without changing what is drawn. */
 .erd-edge__hit {
@@ -262,10 +341,43 @@
  * path thickens, takes the one saturated colour in the palette, and lifts.
  */
 
-.erd-node[data-dimmed],
-.erd-edge[data-dimmed] {
-  opacity: var(--erd-dim-opacity);
+/* Dimming is scoped to the canvas, not stamped onto each element.
+ *
+ * `[data-dimmed]` used to be written per node and per edge from React, which meant
+ * starting a hover changed state on all N-1 elements that are NOT on the traced path — an
+ * O(N) rebuild to express one fact about the diagram. `data-tracing` on the container says
+ * it once. Measured consequence at 120 entities: hover p95 went from 83-195 ms to the
+ * figures in NEXT.md, against NFR-1.3's 100 ms budget.
+ *
+ * `:not([data-traced])` is doing the same job the old boolean did, and reads the same way:
+ * while something is traced, anything that is not traced recedes. */
+/* Untraced boxes AND untraced edges are both dimmed by the scrim below, not by an opacity
+   of their own - see the note on `ViewportPortal` in Canvas.tsx for the measurements. Only
+   traced edges are lifted over it, which is why they need no rule here at all: they are
+   simply not behind the thing doing the dimming. */
+
+/* One composited layer between the untraced boxes and the traced ones.
+   The box is deliberately far larger than any diagram: it is in flow coordinates, inside
+   the transformed viewport, and the browser clips the paint to what is on screen. Sizing
+   it to the diagram bounds instead would mean recomputing those on every layout for no
+   gain. */
+.erd-scrim {
+  position: absolute;
+  left: -50000px;
+  top: -50000px;
+  width: 100000px;
+  height: 100000px;
+  z-index: 1;
+  pointer-events: none;
+  background: var(--erd-paper);
+  opacity: 0;
+  transition: opacity var(--erd-trace-duration) ease-out;
 }
+
+.erd-canvas[data-tracing] .erd-scrim {
+  opacity: calc(1 - var(--erd-dim-opacity));
+}
+
 
 .erd-node[data-traced] {
   border-color: var(--erd-signal);
@@ -275,7 +387,7 @@
 
 /* Dimmed elements sit behind traced ones, so a traced connector crossing a dimmed box
    stays readable rather than disappearing under it. */
-.react-flow__node:has(.erd-node[data-dimmed]) {
+.erd-canvas[data-tracing] .react-flow__node:not(:has(.erd-node[data-traced])) {
   z-index: 0 !important;
 }
 
@@ -294,13 +406,22 @@
   stroke-width: var(--erd-stroke-trace);
 }
 
-/* A dimmed connector keeps more presence than a dimmed box: lines are thin to begin
-   with, so the same opacity erases them faster. */
-.erd-edge[data-dimmed] {
-  opacity: calc(var(--erd-dim-opacity) + 0.15);
+/* An untraced connector used to keep more presence than a dimmed box
+   (`--erd-dim-opacity` + 0.15), on the grounds that lines are thin to begin with so the
+   same opacity erases them faster. It cannot any more: it is dimmed by sitting BEHIND the
+   scrim, and an element behind a wash cannot be made to show through more than the wash
+   allows. Restoring the rule here would dim it twice over.
+   The alternative was lifting the whole edge layer above the scrim, which was built and
+   looked wrong - see the note in Canvas.tsx. */
+
+/* A dimmed connector also drops its label, which used to be done by not rendering it.
+   Hiding it here instead means an untraced edge keeps the same `data` object while
+   something else is traced, which is the whole point of the change above. */
+.erd-canvas[data-tracing] .erd-edge__label:not([data-traced]) {
+  display: none;
 }
 
-.erd-edge[data-traced] .erd-edge__label {
+.erd-edge__label[data-traced] {
   color: var(--erd-ink);
   background: var(--erd-signal-wash);
 }

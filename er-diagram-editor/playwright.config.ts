@@ -2,6 +2,15 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  /*
+   * `perf.spec.ts` belongs to `playwright.perf.config.ts`, and running it here would be
+   * actively misleading rather than merely slow: `webServer` below serves `pnpm dev`, and
+   * NFR-1.4's main-thread numbers are several times larger against React's development
+   * build than against the shipped one. That mistake is already on the record — 473 ms in
+   * the SRS for a day, 96 ms in reality. Wall-clock assertions also do not belong in
+   * `pnpm verify`; see `pnpm test:perf:browser`.
+   */
+  testIgnore: '**/perf.spec.ts',
   fullyParallel: true,
   reporter: 'list',
   use: {

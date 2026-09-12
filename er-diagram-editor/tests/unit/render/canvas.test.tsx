@@ -26,6 +26,7 @@ import {
   inFlightPositions,
   measuredDimensions,
   overlayNodes,
+  reuseUnchanged,
   settledPositions,
   sizesUnchanged,
   traceSets,
@@ -48,8 +49,9 @@ function chain(): { diagram: Diagram; a: Entity; b: Entity; c: Entity } {
 
 describe('traceSets (FR-4.1, FR-4.2)', () => {
   it('traces nothing when nothing is hovered', () => {
-    // Load-bearing: empty sets mean `isDimmed` is false everywhere, so the resting
-    // diagram renders at full strength rather than uniformly faded.
+    // Load-bearing: empty sets mean Canvas leaves `data-tracing` off the container, so
+    // nothing matches the dimming rule and the resting diagram renders at full strength
+    // rather than uniformly faded.
     const { diagram } = chain()
     const traced = traceSets(diagram, undefined, undefined)
 
@@ -144,7 +146,6 @@ function renderNode(data: Partial<EntityNodeData> & { entity: Entity }): RenderR
     data: {
       lod: 2,
       isTraced: false,
-      isDimmed: false,
       tracedAttributeIds: new Set<AttributeId>(),
       selectedAttributeId: undefined,
       foreignKeyTargets: new Map<AttributeId, string>(),
@@ -592,5 +593,82 @@ describe('the three tiers together', () => {
 
     expect(out[0]).not.toBe(base[0])
     expect(out[1]).toBe(base[1])
+  })
+
+  /*
+   * REUSING NODE OBJECTS — THE HALF `sameEntityNode` CANNOT SEE.
+   *
+   * That comparator decides whether a box redraws its CONTENTS. It says nothing about the
+   * cost of handing React Flow a hundred and twenty freshly built node objects, which it
+   * re-adopts one by one because `adoptUserNodes` keeps a node's internals only when the
+   * incoming object IS the object it was given last time. Canvas rebuilds that array on
+   * every hover and every click, so this is what stops the rebuild reaching the library.
+   *
+   * Measured in Chrome on the production build at 120 entities: hover p95 83-195 ms and
+   * selection p95 147-162 ms against NFR-1.3's 100 ms budget, with every one of those
+   * boxes answering "nothing in me changed".
+   */
+  describe('reuseUnchanged', () => {
+    it('hands back the previous object for a node that did not change', () => {
+      const previous = [node('a'), node('b')]
+      const rebuilt = [node('a'), node('b')]
+
+      const out = reuseUnchanged(previous, rebuilt)
+
+      expect(out[0]).toBe(previous[0])
+      expect(out[1]).toBe(previous[1])
+      expect(out[0]).not.toBe(rebuilt[0])
+    })
+
+    it('returns the previous ARRAY when nothing at all changed', () => {
+      // React Flow's StoreUpdater watches the array reference. Returning the same one
+      // means a render where nothing moved costs it nothing at all, rather than an adopt
+      // per node to discover that.
+      const previous = [node('a'), node('b')]
+
+      expect(reuseUnchanged(previous, [node('a'), node('b')])).toBe(previous)
+    })
+
+    it('keeps the node that changed, and only that one', () => {
+      const previous = [node('a'), node('b'), node('c')]
+      const rebuilt = [node('a'), { ...node('b'), selected: true }, node('c')]
+
+      const out = reuseUnchanged(previous, rebuilt)
+
+      expect(out[0]).toBe(previous[0])
+      expect(out[1]).toBe(rebuilt[1])
+      expect(out[2]).toBe(previous[2])
+    })
+
+    it('notices a change inside data, which is a new object on every rebuild', () => {
+      // The field that matters here is `isTraced`. Comparing `data` by reference would
+      // reuse nothing; comparing it deeply would walk every attribute of every entity,
+      // which is the cost being avoided. Shallow is the only right answer, and it relies
+      // on Canvas keeping each field in `data` reference-stable.
+      const previous = [{ ...node('a'), data: { isTraced: false } }]
+      const rebuilt = [{ ...node('a'), data: { isTraced: true } }]
+
+      expect(reuseUnchanged(previous, rebuilt)[0]).toBe(rebuilt[0])
+    })
+
+    it('compares position by value, so an unplaced node is still reusable', () => {
+      // `fallbackPosition` mints a fresh `{x, y}` per render for any entity with no
+      // position yet, so comparing position by reference would refuse to reuse exactly
+      // the nodes that never move.
+      const previous = [{ ...node('a'), position: { x: 5, y: 6 } }]
+      const rebuilt = [{ ...node('a'), position: { x: 5, y: 6 } }]
+
+      expect(reuseUnchanged(previous, rebuilt)[0]).toBe(previous[0])
+    })
+
+    it('does not reuse across a change in the node set', () => {
+      const previous = [node('a'), node('b')]
+
+      const out = reuseUnchanged(previous, [node('a')])
+
+      expect(out).toHaveLength(1)
+      expect(out).not.toBe(previous)
+      expect(out[0]).toBe(previous[0])
+    })
   })
 })

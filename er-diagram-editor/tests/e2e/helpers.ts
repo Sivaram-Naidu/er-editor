@@ -117,3 +117,36 @@ export async function waitForPersisted(page: Page): Promise<void> {
     )
     .toBeGreaterThan(0)
 }
+
+/** Every node's `transform`, in DOM order. Diagram units, not screen pixels. */
+export async function nodeTransforms(page: Page): Promise<string[]> {
+  return page
+    .locator('.react-flow__node')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).style.transform))
+}
+
+/**
+ * Open a file through the app's own "Open file" dialog.
+ *
+ * Chrome has `showOpenFilePicker`, and Playwright cannot drive a native OS file dialog, so
+ * it is deleted first to force `openTextFile`'s `<input type="file">` fallback. That has to
+ * happen before the page loads any script that captures the reference, hence
+ * `addInitScript` and the `goto` here rather than in the caller.
+ *
+ * Consequence worth knowing: the File System Access branch of `openTextFile` is exercised
+ * by nothing at all, in any suite.
+ */
+export async function importFile(page: Page, filename: string, content: string): Promise<void> {
+  await page.addInitScript(() => {
+    // @ts-expect-error -- removing a capability the real browser has, on purpose
+    delete window.showOpenFilePicker
+  })
+  await page.reload()
+
+  const chooser = page.waitForEvent('filechooser')
+  await page.getByRole('button', { name: 'Open file' }).click()
+  await page.getByRole('button', { name: 'Choose a file…' }).click()
+  await (
+    await chooser
+  ).setFiles({ name: filename, mimeType: 'text/plain', buffer: Buffer.from(content, 'utf8') })
+}

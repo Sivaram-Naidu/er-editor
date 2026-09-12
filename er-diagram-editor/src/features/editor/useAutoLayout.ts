@@ -16,8 +16,26 @@ export interface AutoLayoutState {
   error: string | undefined
 }
 
+export interface UseAutoLayoutRequest {
+  /**
+   * The document to arrange, when it is not the one currently on screen.
+   *
+   * Load-bearing for import. `run` otherwise closes over the `diagram` prop as it stood
+   * at the last render, and a caller that loads a document and arranges it in the same
+   * tick — which is exactly what importing does — hands ELK the document it just
+   * replaced. On a fresh session that is the empty one, so `ElkLayoutEngine`
+   * short-circuits it and returns no positions: no worker, no error, no layout, and the
+   * imported schema sits on the placeholder grid. Importing over an existing diagram was
+   * worse, laying out the previous entities and writing positions under ids the new
+   * document does not have.
+   */
+  diagram?: Diagram
+  only?: readonly EntityId[]
+  algorithm?: LayoutAlgorithm
+}
+
 export interface UseAutoLayout extends AutoLayoutState {
-  run: (options?: { only?: readonly EntityId[]; algorithm?: LayoutAlgorithm }) => Promise<void>
+  run: (request?: UseAutoLayoutRequest) => Promise<void>
 }
 
 export interface UseAutoLayoutOptions {
@@ -45,7 +63,7 @@ export function useAutoLayout(options: UseAutoLayoutOptions): UseAutoLayout {
   )
 
   const run = useCallback(
-    async (request?: { only?: readonly EntityId[]; algorithm?: LayoutAlgorithm }) => {
+    async (request?: UseAutoLayoutRequest) => {
       // The run counter makes a stale result harmless. Pressing the button twice on a
       // large schema would otherwise let the first, slower result land after the second
       // and silently overwrite it.
@@ -54,10 +72,13 @@ export function useAutoLayout(options: UseAutoLayoutOptions): UseAutoLayout {
       setError(undefined)
 
       try {
+        // The caller's document wins over the rendered one — see `UseAutoLayoutRequest`.
+        const target = request?.diagram ?? diagram
+
         engineRef.current ??= await createLayoutEngine()
         const result = await engineRef.current.layout({
-          diagram,
-          sizes: measureAll(diagram, lod),
+          diagram: target,
+          sizes: measureAll(target, lod),
           ...(request?.only === undefined ? {} : { only: request.only }),
           ...(request?.algorithm === undefined ? {} : { algorithm: request.algorithm }),
         })

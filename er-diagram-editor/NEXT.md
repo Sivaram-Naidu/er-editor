@@ -48,25 +48,220 @@ at. See "How to drive the real app" at the bottom.
 | Drag not regressed            | 20 distinct transforms during the gesture, dx 114 dy 57, `title="Undo Move entity"`, one undo restores to the pixel.                                                         |
 | Hover trace not regressed     | 2 traced, 2 dimmed on the sample. Trace still reaches the boxes; it just no longer costs them their size.                                                                    |
 | e2e suite                     | **Executed for the first time.** 14 specs against system Chrome, ~40 s. 13 pass, 1 expected-fail (auto-layout, see Tier 1).                                                  |
-| Auto-layout                   | **Broken, in dev and in the production build.** See Tier 1 item 1 — measured, not inferred.                                                                                  |
+| Auto-layout                   | **Broken, in dev and in the production build.** Fixed in the session below.                                                                                                  |
+
+### Verified in a real browser (Chrome, 10 Sep 2026 — auto-layout session)
+
+Both dev and `vite preview` of the production build.
+
+| Thing                           | Evidence                                                                                                                                                                                                              |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Auto-layout button              | All 4 sample boxes move to new ELK positions. Before: `0,0 / 320,0 / 640,0 / 640,260`; after: `12,219 / 344,206 / 626,35 / 336,12`. Zero alerts, zero console errors.                                                 |
+| It runs off the main thread     | Exactly one `worker` event, at `/assets/elk-worker.min-<hash>.js` in prod. An in-process fallback would satisfy every other assertion, so the spec asserts this specifically.                                         |
+| It is still lazy (NFR-1.8)      | **0** workers and no elk network requests before the first layout; after it, `ElkLayoutEngine-*.js` then `elk-worker.min-*.js`.                                                                                       |
+| One undo step (FR-3.4)          | Undo button reads `Undo Auto-layout`; one click restores the displaced arrangement exactly.                                                                                                                           |
+| SQL import arranges the schema  | A 3-table `.sql` imports to `12,25 / 280,12 / 561,12` — **not** `fallbackPosition`'s `0,0 / 280,0 / 560,0` grid. One worker created. Screenshot looked at: a proper left-to-right chain with orthogonal FK-row edges. |
+| Entry bundle still under budget | 718,191 B raw / **222,462 B gzip** (was 717,768 / 222,275). Budget 500 KB. Zero GWT fingerprints (`gwtOnLoad`, `$wnd`) in the entry chunk.                                                                            |
+| Production build, not just dev  | Every row above re-run against `vite preview`. Layout took ~1.06 s end to end, including the 1.6 MB worker fetch.                                                                                                     |
+
+### Verified in a real browser (Chrome, 10 Sep 2026 — box measurement session)
+
+| Thing                              | Evidence                                                                                                                                      |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overlapping boxes, 41-table schema | **0 pairs at L0, L1 and L2**, down from 26. Every rendered box now at least as tall as `measure.ts` predicted.                                |
+| Rows are one line, always          | Every `.erd-attr` measures 26–27 px at L2 where they ran 26–48 px before. The 6-column table went from 333 px to 232 px.                      |
+| The estimate never under-shoots    | `tests/e2e/measurement.spec.ts` compares `measureAll` against `offsetHeight` for every box and passes; over-estimates by at most 4 px.        |
+| Per-row rate, measured             | `.erd-node__attrs`: 136 px at 5 rows, 163 at 6, 437 at 16, 656 at 24, **1642 at 60** — 27.2 to 27.37 px per row, creeping up. Billed at 27.4. |
+| Boxes are much shorter             | L2 heights on the 41-table schema fell from 767–2963 px to **504–1711 px**.                                                                   |
+| Truncation reads well              | Screenshot looked at at 100% zoom: names ellipsize, types stay aligned right, rows uniform. Full name in the `title`.                         |
+| Layout still fast                  | 349 / 264 / 427 ms at L0 / L1 / L2 on 41 tables.                                                                                              |
+| The ribbon is NOT fixed            | Still one vertical column, ~42% shorter. Item 2 is unchanged in kind — see the correction in its entry.                                       |
+
+### Verified in a real browser (Chrome, 10 Sep 2026 — real-schema session)
+
+| Thing                                                | Evidence                                                                                                                                                                                                                  |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pagila, 71 tables of real third-party PostgreSQL DDL | Imports to 72 entities / 36 relationships. **Zero** import warnings, alerts, console errors. **Zero overlapping boxes at L0, L1 and L2.** Layout 354 / 346 / 573 ms.                                                      |
+| NFR-1.4 timing at 120 entities                       | **606 ms (L0), 370 ms (L1), 945 ms (L2)** against a 5 s budget. Consistent with the ~840 ms `test:perf` reports in-process, so the algorithm figure was honest.                                                           |
+| NFR-1.4's 50 ms main-thread clause                   | **Violated.** A `longtask` observer records blocks of **323 ms (L0), 142 ms (L1), 473 ms (L2)**. **Corrected 11 Sep 2026: these are DEV-BUILD figures** — the shipped build blocks for 51/62/96 ms. See the 11 Sep table. |
+| 120 identical tables, laid out                       | Clean grid, no overlaps, minimap populated, edges routed. Screenshot looked at — and this is exactly why the synthetic fixture proves nothing.                                                                            |
+| 41 tables with realistic names                       | Every rendered box taller than `measure.ts` predicted, worst by **586 px (86%)**; **26 overlapping pairs**, worst 300x530 px.                                                                                             |
+| Hub-and-spoke at L2                                  | 40 tables onto one hub renders as a single vertical ribbon, ~1,000 px wide by ~40,000 px tall. Screenshot looked at: unreadable at any zoom.                                                                              |
+| The `.erd.json` fixtures                             | `reference.erd.json` / `stress.erd.json` / `small.erd.json` are empty **and invalid** — no top-level `id`, so importing one is rejected. Their README claimed 120 and 300 entities.                                       |
+
+### Verified in a real browser (Chrome, 11 Sep 2026 — hub layout session)
+
+| Thing                               | Evidence                                                                                                                                                                 |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 41-table hub schema, extent         | L0 **3038x889** (was 708x3864), L1 **3376x1484** (was 838x7264), L2 **3186x4275** (was 838x21134). Aspect 0.18/0.12/0.04 → **3.42/2.27/0.75**. L2 is five times shorter. |
+| All boxes present, none overlapping | 41 of 41 rendered after fitView, **0 overlapping pairs** at every detail level.                                                                                          |
+| It reads as a diagram               | Screenshot looked at: hub on the left, 40 dependents in a ~7-column block, orthogonal edges, table and key names legible. Was a 1px-wide ribbon.                         |
+| Pagila is untouched                 | 1726x1536 / 2657x1966 / 4063x2992 — **byte-identical** to the same run with the split disabled. A real schema whose tables are mostly unrelated does not trigger it.     |
+| 120-entity reference is a wash      | L0 1616x2105 vs 1616x2047 disabled; L2 4945x3090 vs 4945x3205. Marginally squarer at L2, no overlaps either way.                                                         |
+| Layout still fast                   | 344 / 321 / 728 ms at L0 / L1 / L2 on 41 tables. `pnpm test:perf` budgets still pass.                                                                                    |
+
+### Verified in a real browser (Chrome, 11 Sep 2026 — main-thread blocking session)
+
+Production build (`vite preview`) unless stated. Every figure is the **median worst
+`longtask` block over three runs**, measured with the fixture pre-positioned on a grid so
+importing it does NOT auto-arrange and the Auto-layout click genuinely moves every box.
+
+| Thing                                           | Evidence                                                                                                                                                                                               |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The 323/142/473 ms on record were DEV numbers   | Same harness, same clicks: **dev 303 / 340 / 417 ms**, **production build 51 / 62 / 96 ms** at L0 / L1 / L2 on 120 entities. React's development build dominates its own profile.                      |
+| Where the time actually goes                    | CPU profile of the apply, DEV build: Immer **~15 ms**, validation **~7 ms**, store publish **<1 ms**. The block is React render and commit, not the command. Revalidation was a red herring.           |
+| A move redrew every box's contents              | Render counters inside the page: one layout at 120 entities / L2 cost **120 EntityNode renders and 1,920 AttributeRow renders**. After the fix: **0 and 0**.                                           |
+| Blocks, 120 entities (L0 / L1 / L2)             | **51 / 62 / 96 ms → 0 / 51 / 55 ms.** L0 no longer produces a long task at all; L2 is 43% shorter. The budget is 50 ms, so L1 and L2 still miss it — narrowly.                                         |
+| Blocks, 300 entities (NFR-2.2 ceiling), L2      | **202 ms → 135 ms.** Still 2.7x the budget, which is why the item stays in Tier 1.                                                                                                                     |
+| `startTransition` around the apply does nothing | Measured rather than assumed: 57 ms at 120 and 128 ms at 300, i.e. unchanged. `useSyncExternalStore` de-opts a transition to synchronous rendering, and both stores use it. **Do not redo this.**      |
+| A reference-stable `edges` array does nothing   | Also measured: 56 ms at 120 and 139 ms at 300, unchanged. Rebuilding the edge array is not the cost. **Do not redo this either.**                                                                      |
+| Nothing regressed                               | Screenshots looked at: 120 boxes laid out, minimap populated, edges routed. Hover traces 3 boxes and dims 15, with the connectors highlighted. Inline rename redraws the box. **Zero console errors.** |
+| The gate                                        | `pnpm verify` green, all 16 e2e specs included.                                                                                                                                                        |
+
+### Verified in a real browser (Chrome, 11 Sep 2026 — NFR-1.3 / NFR-1.4 session)
+
+Production build (`vite preview`), 120-entity reference schema, all boxes framed before
+every measurement. `pnpm test:perf:browser` reproduces every row.
+
+| Thing                                       | Evidence                                                                                                                                                                                                                     |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| The layout apply, worst `longtask` of 3 runs | **57 / 58 / 66 ms (L0), 0 / 0 / 0 ms (L1), 58 / 58 / 73 ms (L2)** over three separate invocations. `longtask` has a 50 ms floor by definition, so an L1 reading of 0 means "no task crossed the clause's threshold at all".   |
+| NFR-1.4's clause, narrowed rather than met   | The residue is one task at the end of a deliberate, once-per-session action. Buying it back means staging positions over frames while FR-3.4 still demands one undo step — a second two-tier overlay. Decision recorded in the SRS row. |
+| NFR-1.3, measured in a browser at last       | Follow zoom: hover p95 **49 / 56 / 57 ms**, selection **68 / 74 / 82 ms**, keystroke **13 ms**. All inside the 100 ms budget, over three runs.                                                                               |
+| NFR-1.3, pinned to All fields                | **Missed.** Selection p95 **147 / 161 / 162 ms** on every run; hover **83 / 91 / 195 ms**. Keystrokes fine at 13–16 ms. This is Tier 1 item 1, promoted out of Tier 3 on the strength of it.                                  |
+| The measurement is honest about itself       | `t0` is the trusted event's own `timeStamp`, not a driver-side clock, so the CDP round trip is excluded; `t1` is taken in the `requestAnimationFrame` after the change is observable, so React's render and commit are included. |
+| The dev-build trap cannot recur              | `perf.spec.ts` asserts no `/@vite/client` and an `/assets/` entry chunk before it measures anything, and `playwright.config.ts` refuses to run the file at all.                                                              |
+| Nothing regressed                            | `pnpm verify` green. Zero `role="alert"` after every layout.                                                                                                                                                                |
+
+### Verified in a real browser (Chrome, 11 Sep 2026 — node-rebuild session)
+
+Production build, 120 entities, all boxes framed, Detail pinned to All fields, 25 samples
+per gesture. **Medians, because the p95 is not stable on this machine** — the tail tracks
+background load and moved between 56 and 170 ms across five passes with no code change,
+while the median moved by 10 ms. `pnpm test:perf:browser` reproduces it.
+
+| Thing                                        | Evidence                                                                                                                                                                              |
+| -------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hover, the number the item was promoted for  | Median **59 / 90 / 99 ms → 43 / 46 / 48 / 50 / 53 ms** over three passes before and five after. Roughly halved and consistent.                                                        |
+| What actually cost that                      | `tracedAttributeIds` was ONE Set for the whole diagram, so a hover minted a new one, `sameEntityNode` compared it by reference, and all 120 boxes redrew every row. Now one set per entity. |
+| Dimming stopped being an O(N) state change   | `isDimmed` was a per-node boolean, so starting a hover rebuilt all N-1 untraced nodes to say so. Now one `data-tracing` flag on the canvas and a `:not([data-traced])` rule in CSS.    |
+| A click, with the pointer already on the box | **25 ms median**, and **5 EntityNode / 40 AttributeRow renders** per selection at 120 entities. The click itself is not the problem and never was.                                    |
+| A COLD click is still ~100 ms                | Median **99–108 ms** at All fields, unchanged by this work. Move-then-press with no dwell makes the hover render and the selection render run back to back. New item 1 below.         |
+| Selection deliberately does NOT reuse nodes  | React Flow keeps its own `selected` on the internal node and re-reads ours only when the object reference differs. Reusing left a shift-clicked pair showing one highlight while the store held two. |
+| Nothing regressed                            | `pnpm verify` green, 16 e2e specs, 720 unit tests. The shift-click regression above was caught by the e2e suite, not by review.                                                       |
+
+### Verified in a real browser (Chrome, 11 Sep 2026 — cold-click mechanism session)
+
+Production build, 120 entities, Detail pinned to All fields, all boxes framed. 20 samples
+per condition, and the conditions are **interleaved one sample at a time** rather than swept,
+because a swept A/B on this canvas measures the run order (see "Known broken" 2).
+
+Every primary reading is a COUNT or a block duration taken at the instant of the trusted
+`pointerdown`, from inside the page, with no driver round trip between the move and the
+press — inserting one changes the gap under study.
+
+| Condition                    | pointerdown→frame | →DOM | DOM→frame | EntityNode | AttributeRow | transitions running | blocked (longtask) |
+| ---------------------------- | ----------------- | ---- | --------- | ---------- | ------------ | ------------------- | ------------------ |
+| COLD (settle → move → press) | **195 ms**        | 190  | 6         | **4**      | **32**       | 164                 | **172 ms**         |
+| WARM (move → settle → press) | **41 ms**         | 36   | 5         | **4**      | **32**       | 0                   | **0 ms**           |
+| COLD, dimming neutralised    | 119 ms            | 112  | 6         | 4          | 32           | 42                  | 104 ms             |
+| COLD, all trace CSS off      | 111 ms            | 104  | 7         | 4          | 32           | 0                   | 97 ms              |
+| COLD, all transitions off    | 154 ms            | —    | —         | 4          | 32           | **0**               | —                  |
+
+| Thing                                          | Evidence                                                                                                                                                                                                                                  |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **The press does identical React work either way** | **4 `EntityNode` and 32 `AttributeRow` renders, in every condition, in every run.** Counters read inside the page, snapshotted in the capture phase of the trusted `pointerdown` and again at the frame showing `.selected`. This is the comparison item 1 asked for, and it comes back a dead heat. |
+| So the extra cost is not React                 | Follows from the row above by the item's own decision rule. What it is instead is below.                                                                                                                                                  |
+| It is not the frame pipeline either            | `DOM→frame` — the class landing to the frame that can show it — is **5-7 ms in every condition**, cold and warm alike. All of the difference is in `pointerdown → the class actually being set`: 190 ms cold against 36 ms warm.           |
+| It is synchronous blocking, not queueing       | A `longtask` overlapping the press measures **172 ms cold and nothing at all warm** (warm produces no entry, so it is under `longtask`'s 50 ms floor). The cold press blocks the main thread inside its own task.                          |
+| **The running transitions are a correlate, not a cause** | 164 CSS transitions are still running when the cold press lands, against 0 for warm — which looks like the answer and is not. Disabling every transition takes the count to **0** and leaves the latency at **154 ms**. Ablated, not assumed. |
+| Roughly half the cost is the trace's own repaint | Neutralising the dimming rule alone: 195 → **119 ms**. Neutralising every trace declaration: → **111 ms**. So the visual half of a hover is real and is about 80 ms of it.                                                                 |
+| The other half survives with the trace invisible | With every trace declaration neutralised the press still blocks for **97 ms**. What is left is the hover's DOM attribute mutations and the style re-matching they force — and note a CSS override cannot remove the **`:has()` matching cost**, only the declarations, so this ablation under-states that half. |
+| **The 172 ms gap on record is the wrong gesture** | The move→press gap in the gesture `perf.spec.ts` actually measures is **47-51 ms** (one run 121). The 172 ms belongs to `coldClick`, which parks at (8,8) and does a round-tripping `elementFromPoint` check first: measured **248 ms** from its first move and **65 ms** from its last. See the correction in item 1. |
+| **Removing the `:has()` rules changes nothing** | Measured on 12 Sep 2026 by restoring the pair as an ablation and interleaving it against the version without them: **196 ms vs 200 ms latency, 169 ms vs 175 ms blocked**, n=20 each, same run. Reverted. |
+| Dimming holds up on a second run       | **196 → 122 ms** with the dimming rule neutralised, blocked **169 → 109 ms**, in the same interleaved run. Consistent with the 195 → 119 on the run above. |
+
+### Verified in a real browser (Chrome, 12 Sep 2026 — scrim session)
+
+Production build, 120 entities, All fields, 20 samples per condition, conditions
+**interleaved**. The "before" is the per-node dimming restored as an ablation, so before and
+after are one run rather than two — and it is `display: none` on the scrim rather than
+`opacity: 0`, because an always-present composited layer changes how Chrome layerises the
+viewport even when invisible, and a first attempt measured the "before" 46 ms too fast.
+
+| Condition                          | pointerdown→frame | blocked | style | paint+ |
+| ---------------------------------- | ----------------- | ------- | ----- | ------ |
+| BEFORE — dimming on every box      | 119 / 139 / 139 / 135 | 106 / 119 / 120 / 117 | 16-21 ms | 94-105 |
+| **AFTER — one scrim**              | **105 / 114 / 119 / 115** | **84 / 102 / 98 / 101** | **11-14 ms** | **78-90** |
+| Ceiling — no dimming at all        | 107 / 106 / 107 / 113 | 92 / 91 / 93 / 95 | 13-14 ms | 72-83 |
+| WARM (pointer already on the box)  | 36 / 37 / 35 / 36 | 0 | 2 ms | 41-49 |
+
+| Thing                                   | Evidence                                                                                                                                                                                              |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The scrim reaches the ceiling           | AFTER lands **at or below** the figure for removing dimming outright, across four runs, while still dimming. ~20 ms of latency and ~20 ms of blocked main thread against the per-node rule.            |
+| It is dimming the right things          | Measured in the page mid-hover: scrim opacity **0.45** at z **1**, traced wrappers at z **5**, untraced at z **0**, and an untraced box's OWN opacity is **1** — it is not dimming itself any more.    |
+| Edges stay behind boxes                 | Screenshot looked at. The first build lifted the whole `.react-flow__edges` layer over the scrim and **every connector drew through every untraced table** — a grid of lines crossing boxes. Only traced edges are lifted now (`zIndex: 2` per edge). |
+| Render counts still identical           | 4 `EntityNode` / 32 `AttributeRow` charged to the press, unchanged in every condition. The scrim changes what the browser paints, not what React does.                                                 |
+| It is still outside NFR-1.3             | 105-119 ms against a 100 ms budget. Narrowed, not met. See item 1.                                                                                                                                    |
+| The gate                                | `pnpm verify` green, 16 e2e specs, including the hover spec rewritten onto the new mechanism.                                                                                                          |
 
 ### Known broken
 
-1. **Auto-layout does nothing, and throws.** `elkjs/lib/elk.bundled.js` cannot run inside a
-   Web Worker, which is exactly what `src/layout/worker/layout.worker.ts` asks of it.
-   Diagnosed to the line; see Tier 1 item 1. This also means the path NEXT.md calls the
-   strongest in the product — SQL DDL to auto-layout in one click — does not work: an
-   imported schema lands on the placeholder grid.
-2. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
-   arrangement work is lost. A product gap rather than a bug — see Tier 2.
-3. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+1. **NFR-1.3 is still missed, narrowly, when a click follows the pointer onto a box and
+   Detail is pinned to All fields.** **105-119 ms against a 100 ms budget**, down from ~195
+   after the scrim landed on 12 Sep 2026; blocked main thread ~96 ms, down from ~170. The
+   cause is known and the one fix worth making is in: not React (the press does an identical
+   4 `EntityNode` / 32 `AttributeRow` renders either way), but the paint the hover left
+   pending. What is left is not a hot spot — removing dimming ENTIRELY still costs 106-113 ms
+   — so Tier 1 item 1 is now a decision about the requirement rather than a bug. At the
+   detail level the tool actually uses at 120 tables (Follow zoom, so L0) everything is
+   inside budget, and a click with the pointer already resting on the box is 36 ms.
+   **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
+   single task that applies a layout, which is what it was always protecting against
+   interference with. See the SRS row.
+2. **Interaction timings on this machine have a noise floor of roughly 100 ms, which is
+   bigger than most changes worth making.** Five passes with no code change put hover's p95
+   anywhere between 56 and 170 ms while its median moved by 10 ms — so read the medians,
+   and `perf.spec.ts` asserts on them for that reason. But medians are not safe either
+   across a long run: an A/B of five CSS conditions drifted by ~90 ms between the forward
+   and reversed sweep, and produced a self-contradictory ordering even when interleaved
+   (Tier 1 item 1 has the numbers). **Use time to size a problem, never to choose between
+   two fixes.** For that, assert a mechanism — render counts, commits per gesture, whether
+   a worker was created — the way `redraw.test.tsx` and the auto-layout spec do.
+3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+   arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
+   visible thing on this list, because the layout it throws away is finally a real one.
+4. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-4. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+5. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
    overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
-Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without new evidence:
+Fixed and verified in a browser on 10–11 Sep 2026 — do not re-open these without new
+evidence:
+
+- ~~A hub-and-spoke schema is unusable at L2.~~ **Fixed 11 Sep 2026.** None of ELK's own
+  options touch it: `elk.aspectRatio`, `elk.layered.wrapping.strategy` and
+  `elk.layered.highDegreeNodes.treatment` all produce byte-identical output, because
+  `wrapping` wraps a long chain of layers and the problem is one layer with too many nodes
+  in it. The fix does the layering itself — compute dependency depth, split any crowded
+  depth into partitions, hand ELK the answer (`src/layout/elk/wideLayers.ts`). L2 went from
+  838x21134 to 3186x4275, and Pagila is byte-identical to before.
+
+- ~~`measure.ts` under-measures every box whose column names wrap.~~ Rows are now pinned to
+  one line in CSS (`text-overflow: ellipsis`, with the full name in the `title`), so the
+  flat per-row height is correct by construction rather than by calibration. 26 overlapping
+  pairs → 0. The constants were re-measured off the DOM rather than read off the stylesheet
+  by eye, and the per-row rate turned out to be 27.37 px rather than 27 — a flat 27
+  under-measures a 60-column table by 22 px, which is why the fixture now contains one.
+
+- ~~Auto-layout does nothing, and throws.~~ **Two independent defects, not one.**
+  `elk.bundled.js` cannot run inside a Web Worker — it is the main-thread build whose job is
+  to start one. And separately, `autoLayout.run()` read the pre-import `diagram` prop, so
+  the import path arranged the document it had just replaced; on a fresh session that is the
+  empty one, which the engine short-circuits, so it was a silent no-op. Fixed by letting
+  elkjs own the worker and by passing the imported document explicitly.
 
 - ~~Clicking an entity does not select it, and clears the selection you had.~~ Root cause was
   that the app dropped React Flow's `dimensions` changes; every node rebuild therefore
@@ -78,14 +273,19 @@ Fixed and verified in a browser on 10 Sep 2026 — do not re-open these without 
 
 ### Numbers, so drift stays visible
 
-- 694 unit tests in 28 files, ~58s. Coverage 92.1% statements / 83.0% branches / 93.4%
+- 720 unit tests in 31 files, ~58s. Coverage 92.2% statements / 83.7% branches / 93.6%
   lines against an 80% gate.
-- **14 e2e specs in 2 files, ~40s, and they run.** 13 pass; 1 (`auto-layout`) is marked
-  `test.fail()` because the feature is broken — Playwright turns the suite red if it starts
-  passing, which is the reminder to drop the marker. `pnpm test:e2e` is part of
-  `pnpm verify` now, and the config uses `channel: 'chrome'` so no browser download is
-  needed.
-- Bundle 718 kB raw, 222 kB gzipped.
+- **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
+test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
+  download is needed.
+- **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
+test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`, because
+  they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
+  assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
+  and says why.
+- Bundle 719 kB raw, 225 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
+  inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
+  only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
 
@@ -99,17 +299,24 @@ The bet is sound; the tool is not yet. Three things are genuinely differentiated
 protecting:
 
 - **Large schemas.** LOD + viewport culling + hover-tracing is a real answer to a real
-  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first.
+  problem. Mermaid cannot lay out 100 tables readably; dbdiagram.io is DSL-first. **Now evidenced** (11 Sep 2026): 120 tables lay out cleanly in under a second in
+  Chrome, a real 71-table dump imports with no overlaps at all, and the two shapes that
+  broke it — realistic column names, and one hub with 40 dependents — are both fixed with
+  browser evidence above. What is still unproven is that it stays RESPONSIVE while doing
+  it: NFR-1.3's 100 ms interaction budget is missed with Detail pinned to All fields —
+  selection p95 147–162 ms at 120 entities, measured on the production build (Tier 1
+  item 1). It is met at the detail level the tool actually uses at that size, which is the
+  LOD mechanism doing its job, but "usable at 120 tables" has to mean usable with the
+  fields showing.
 - **Nothing leaves the browser.** No backend, no telemetry. A wedge the SaaS tools
   structurally cannot serve: anyone under NDA, under compliance, or air-gapped.
-- **SQL DDL to auto-layout in one click.** The strongest path in the product — and as of
-  10 Sep 2026 the layout half of it has never worked in a browser (Tier 1 item 1). The
-  parsing half does. This is the single most valuable thing to repair, precisely because
-  everything else about the wedge depends on it.
+- **SQL DDL to auto-layout in one click.** The strongest path in the product, and as of
+  10 Sep 2026 it works end to end — verified in Chrome against the production build, not
+  just in dev. The layout half had never worked before that, and it took two separate
+  fixes.
 
-Two things block it. One is the bug list above — and note that the first entry on it is
-inside the third bullet, not beside it. The other is more important, and is the reason
-Tier 2 exists:
+Two things block it. One is the bug list above. The other is more important, and is the
+reason Tier 2 exists:
 
 **The layout is the user's work product, and the tool throws it away.** The strongest use
 case — "make my existing database navigable" — means re-importing after every migration.
@@ -145,13 +352,21 @@ now runs in `pnpm verify` against the system Chrome. On its first execution:
   handle. It had never been a valid gesture.
 - The auto-layout spec asserted `before !== after` around a bare Auto-layout click on a
   sample that ships already laid out, so it asserted nothing.
-- And then, once it did assert something, it found that **auto-layout is broken outright**.
+- And then, once it did assert something, it found that **auto-layout was broken
+  outright** — fixed on 10 Sep 2026, and it needed two separate fixes rather than one.
 
-The same reasoning applies to the other coverage exclusion nobody had checked:
-`src/layout/worker/**` is excluded because it "constructs a real Worker and dynamically
-imports elkjs" — and nothing had ever constructed that Worker in a browser. It does not
-work. Treat every remaining exclusion in `vite.config.ts` as unverified until an e2e spec
-covers it.
+One more lesson from that fix, worth keeping: the auto-layout spec now asserts a `worker`
+event fires, not merely that the boxes moved. elkjs has an in-process fallback that would
+have satisfied every other assertion in that spec while blocking the main thread — the exact
+NFR-1.4 violation the worker exists to prevent. **When a requirement is about HOW something
+runs, assert the mechanism and not only the outcome.**
+
+The same reasoning applied to the other coverage exclusion nobody had checked:
+`src/layout/worker/**` was excluded because it "constructs a real Worker and dynamically
+imports elkjs" — and nothing had ever constructed that Worker in a browser. It did not work.
+That one is now backed by a spec that clicks Auto-layout in Chrome and asserts the boxes
+move. Treat every remaining exclusion in `vite.config.ts` as unverified until an e2e spec
+covers it, and add the spec in the same change as the exclusion.
 
 The architecture is not the problem and does not need rework. Enforced layer boundaries,
 patch-derived undo inverses, schema-as-source-of-truth, WeakMap-cached derivations: every
@@ -160,87 +375,118 @@ almost entirely into the layers a unit test can reach.
 
 ---
 
-## Tier 1 — make it work at all
+## Tier 1 — what running it on real data found
 
-### 1. Auto-layout is broken in the browser
+The name of this tier has changed three times now, and the changes are the record. It was
+"make it work at all" while clicking a table did nothing, the minimap was blank and
+auto-layout threw. It became "find out whether it works on real data" once those were fixed,
+and that investigation ran: a real 71-table PostgreSQL dump and a schema shaped like an
+enterprise warehouse. Both of the things it found — boxes whose size the tool was wrong
+about, and a graph shape it was indifferent to — are fixed, with browser evidence above.
 
-**This is now the top of the queue, and it is bigger than it looks: it takes the product's
-strongest claim with it.** `docs/SRS.md` and this file both describe "SQL DDL to
-auto-layout in one click" as the best path through the tool. The layout half of it has
-never worked in a browser.
+What is left in this tier is the third question, which the first two were hiding: the tool
+lays out 120 tables in under a second, but is it RESPONSIVE while you use them? That had
+never been measured outside jsdom. It has now, and the answer is item 1.
 
-**Already established — do not redo this:**
+Worth not re-deriving: 120 tables lay out in under a second in Chrome, a real dump imports
+with no overlaps at all, and the ~840 ms the perf suite reports in-process was an honest
+number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
+identified reason.
 
-- Clicking **Auto-layout** throws and moves nothing. `_Worker is not a constructor` in dev,
-  `o is not a constructor` in the minified production build. It surfaces in the UI as a
-  `role="alert"` banner, so it is at least not silent.
-- **The production build is affected too**, not just the dev server. Confirmed against
-  `vite preview`.
-- **Importing a `.sql` file leaves the schema on the placeholder grid.** `Editor.tsx` calls
-  `autoLayout.run()` after an import, and it throws. Measured: a 3-table SQL file imports
-  to `translate(0px, 0px)`, `translate(280px, 0px)`, `translate(560px, 0px)` — exactly
-  `fallbackPosition`'s `GRID_X = 280` grid, before and after clicking Auto-layout. It looks
-  plausible on a 3-table chain only because the placeholder grid is also a row; it will look
-  like a grid of unrelated boxes on anything real.
-- **The cause, at the line.** `elkjs/lib/elk-worker.js` decides what it is by environment:
+### 1. A cold click is still outside NFR-1.3, and what is left is a decision
 
-  ```js
-  if (typeof document === 'undefined' && typeof self !== 'undefined') {
-    self.onmessage = dispatcher.saveDispatch // "I am the worker body"
-  } else if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { default: FakeWorker, Worker: FakeWorker }
-  }
-  ```
+**The open question in this slot is CLOSED, and the one fix worth making has landed.**
+Measured 11 Sep, fixed 12 Sep 2026. A cold click was ~195 ms and blocked the main thread for
+~170 ms; it is now **105-119 ms**, blocking ~96 ms, against a 100 ms budget. The item stays
+open because that is still a miss — but every mechanism anyone has proposed for it has now
+been measured, three of the four were no-ops, and what is left is option 3 below.
 
-  Inside a real Web Worker the first branch wins, so nothing is exported. But
-  `elk.bundled.js` — which `layout.worker.ts` imports — does this when no `workerFactory`
-  is supplied:
+**Already established — do not redo any of this.**
 
-  ```js
-  var _require = require('./elk-worker.min.js'),
-    _Worker = _require.Worker
-  optionsClone.workerFactory = function (url) {
-    return new _Worker(url)
-  }
-  ```
+- **The press does the SAME React work in both conditions: 4 `EntityNode` and 32
+  `AttributeRow` renders.** Identical in five conditions across three runs, counted inside
+  the page at the trusted `pointerdown` and again at the frame that shows `.selected`. This
+  was the comparison this item asked for, and it settles the branch: **the extra cost is not
+  React.** (The 5/40 on record was a different box; the shape of the answer is the same.)
+- **It is not the frame pipeline either.** Splitting the latency at the moment the class is
+  actually set gives `DOM→frame` of **5-7 ms in every condition**. All of the difference is
+  upstream of the DOM change: **190 ms cold against 36 ms warm.**
+- **The cold press BLOCKS for ~172 ms** — a `longtask` overlapping it — where the warm press
+  emits no entry at all. So it is synchronous work inside the press's own task, not the
+  selection waiting its turn behind an animation.
+- **The 164 running CSS transitions are a correlate, not the cause.** They are the obvious
+  suspect and they are wrong: killing every transition takes the count to 0 and leaves the
+  latency at 154 ms. *This is the second time a plausible story about this gesture has
+  survived until someone ablated it. Ablate it.*
+- **What the press is actually paying for is the style and layout the hover left pending**,
+  flushed synchronously when the press's own handler runs. Neutralising the dimming rule
+  alone takes it 195 → 119 ms; neutralising every trace declaration takes it to 111 ms and
+  still leaves a 97 ms block. The residue is the hover's DOM attribute mutations and the
+  selector re-matching they force — including the two `:has()` rules, whose **matching** cost
+  a CSS override cannot remove, so that ablation under-states its own half.
+- **`settle()` is not cheating.** The warm figure is a real measurement of a real gesture
+  (pressing a box the pointer already rests on); it is simply not the common one. Both
+  numbers are honest and they are measuring different things.
 
-  `_Worker` is `undefined`, and `new ELK()` throws at worker module top level. So
-  `elk.bundled.js` **cannot be used inside a Web Worker at all**: it is the main-thread
-  build, whose whole job is to start a worker of its own.
+**Corrected: the 172 ms gap was the wrong gesture.** The gap between the pointer landing on
+the box and the button going down, in the gesture `perf.spec.ts` actually measures, is
+**47-51 ms** — not 172. The 172 ms belongs to `coldClick`, which parks the pointer at (8, 8)
+and does a round-tripping `elementFromPoint` check before the real move: measured at 248 ms
+from its first move and 65 ms from its last. Everything that was inferred from "the 120 ms
+transition has finished before the press arrives" is therefore unsupported — at a 50 ms
+dwell the transition is a third done. It happens not to change the conclusion, because the
+transitions are not the cause either, but the premise was wrong and is corrected here and in
+CLAUDE.md.
 
-**Recommended fix — let elkjs own the thread.** `elk-worker.min.js` is _designed_ to be the
-worker body, so the hand-written wrapper is the thing to remove rather than repair:
+**The decision that needs making.** Three directions, and they are not equivalent:
 
-```ts
-import ELK from 'elkjs/lib/elk-api.js'
-import elkWorkerUrl from 'elkjs/lib/elk-worker.min.js?url'
+1. ~~**Stop the hover dirtying 111 boxes at all.**~~ **Done 12 Sep 2026.** One overlay
+   (`.erd-scrim`, rendered through React Flow's `ViewportPortal`) sits between the untraced
+   boxes and the traced ones and dims by compositing instead of by repainting 111 boxes and
+   ~1,900 rows. It reaches the ceiling that removing dimming outright defines: **~119 → ~110
+   ms, blocked ~118 → ~96 ms**, over four interleaved runs. Two things it cost, both in the
+   browser table: untraced connectors lost the slightly-lighter dim they used to get, because
+   an element behind a wash cannot show through more than the wash allows; and only TRACED
+   edges are lifted over the scrim, after lifting the whole edge layer turned the diagram
+   into a grid of lines drawn through tables.
+2. ~~**Drop the two `:has()` rules.**~~ **Tried on 11 Sep 2026 and it does nothing.** Both
+   were removed and the z-index set from React as a class on the traced wrappers instead,
+   then measured against the `:has()` pair restored as an ablation **in the same run,
+   interleaved**: **196 ms against 200 ms, and 169 ms of blocked main thread against
+   175 ms**, n=20 each. That is inside the noise floor. The change was reverted rather than
+   kept — it is a no-op that also lets a selected untraced box elevate above the traced path,
+   which is a behaviour change for nothing. `:has()` is the famous expensive selector and it
+   is not what is expensive here. **Do not redo this.**
+3. **Accept the rest and re-word NFR-1.3.** Now the only one left. The gesture is a
+   pointer arriving and pressing immediately; the budget is 100 ms; it costs **105-119 ms**
+   at L2 after the scrim, and is comfortably inside budget at the detail level 120 tables
+   actually render at. What remains is not a hot spot with a name — with dimming removed
+   ENTIRELY the same gesture still costs 106-113 ms, so the residue is the cost of a
+   selection render landing on a main thread that has just done a hover, not any one rule.
+   Buying it back means making the hover itself cheaper, which is a different item.
+   **This is now a decision to take rather than a bug to fix.**
 
-// Classic worker, not `{ type: 'module' }` — elk-worker.min.js is a browserify UMD bundle.
-const elk = new ELK({ workerFactory: () => new Worker(elkWorkerUrl) })
-```
+**Whichever is chosen, the guard is a render-count and block-duration assertion, not a
+stopwatch** — the harness for it is in the browser table above and was deleted with the
+session; rebuild it from that description rather than trusting a wall-clock number.
 
-That deletes `layout.worker.ts`, `protocol.ts` and most of `client.ts`, and keeps NFR-1.4
-(layout off the main thread) and NFR-1.8 (elkjs not in the main bundle — check the built
-chunks to confirm the second one still holds). Worth confirming the approach before
-building, since it changes what ADR-0002 describes.
+**Not worth trying.** Deferring or suppressing the hover (the reverted scheduler). Reusing
+node objects on a selection render — React Flow keeps its own `selected` and reusing breaks
+shift-click, which has an e2e spec. `startTransition` and a reference-stable `edges` array,
+both measured as no-ops. **Disabling the transitions** — measured, a no-op too.
+**Removing the `:has()` rules** — measured in-run against itself, a no-op, reverted.
 
-Whatever the fix, **the acceptance test already exists**: `tests/e2e/smoke.spec.ts` has the
-auto-layout spec marked `test.fail()`. Remove the marker as part of the fix; the suite goes
-red on its own if you forget, because Playwright reports an expected failure that passes.
-Add one for the import path too — a `.sql` import must not land on the 280px grid.
+So three of the four plausible stories about this gesture are now dead, and the survivor is
+the dimming repaint. That is where the next attempt goes.
 
-### 2. Run one real schema through it
 
-Was Tier 2 item 5. Promoted, because two of the three bugs found on 10 Sep were invisible on
-the sample: auto-layout looks like it works on a 3-table chain, and the four-box sample
-never showed how much of the canvas the inspector and minimap cover.
+### 2. Search and command palette (FR-2.6, FR-9.2)
 
-`docs/SRS.md` §13.1 already admits every performance figure comes from synthetic fixtures
-with uniform table sizes and tidy relationships. A real dump — 60-column tables, 200 foreign
-keys into one table, names like `tbl_cust_hist_2019` — will teach more in five minutes than
-another week of synthetic testing. The width estimates in `measure.ts` are exactly the kind
-of thing it should break, and there is a no-overlap test that will say so. Do this after
-item 1, since a real schema without working auto-layout only shows the placeholder grid.
+Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
+reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
+being usable at that size. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026 after
+sitting unused through six stages; re-add them when this starts, or decide that a substring
+match over a hundred table names does not need a fuzzy-search library.
 
 ## Tier 2 — make it actually useful
 
@@ -260,24 +506,10 @@ applied.
 
 In order:
 
-4. **Search and command palette** (FR-2.6, FR-9.2). At 100 tables, "find CUSTOMER" is worth
-   more than everything else unbuilt. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026
-   after sitting unused through six stages; re-add them when this starts, or decide that a
-   substring match over a hundred table names does not need a fuzzy-search library.
-5. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
+4. **Sticky trace on click** (FR-4.4). Today the highlight dies the moment the pointer
    leaves, so you cannot pan while tracing — which defeats tracing on any schema larger
    than one screen.
-6. **Stop rebuilding every node object on hover.** The performance half of the
-   click-to-select fix, and worth doing on its own merits — it is what CLAUDE.md's
-   split-store note already promises ("hover is separated _so that_ it does not re-render
-   every table"), and `Canvas` does not honour it: it takes `hoveredEntityId` as a prop and
-   rebuilds all N nodes through the `baseNodes` memo on every hover. Not a correctness bug
-   any more — carrying `measured` made rebuilds harmless — so this is now purely about not
-   doing O(entities x attributes) work per hover at 120 tables. The move is to have
-   `EntityNode` subscribe to trace state by its own id instead of receiving it in
-   `node.data`. Measure first: at four entities it is free, and the cost has never been
-   measured at scale.
-7. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
+5. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
    shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
    `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
    "N more" row.
@@ -299,6 +531,24 @@ In order:
 ---
 
 ## Housekeeping worth doing while nearby
+
+- **There are TWO git repositories here, and the inner one is stale.** The real repo is at
+  `Er_tool/` (branch `fix/auto-layout-worker`, current history); `er-diagram-editor/` also
+  has its own `.git`, stuck at a single commit "ER diagram editor: V1 through Stage 11".
+  A `git` command run from inside `er-diagram-editor/` therefore talks to the STALE repo:
+  `git status` reports almost every file as modified, and — the part that actually bites —
+  `git checkout -- <file>` silently reverts the file to months-old content. It did exactly
+  that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25 lines including the whole
+  `UseAutoLayoutRequest` fix. Run git from `Er_tool/`, or use `git -C`. The inner `.git`
+  wants deleting, but that is not a change to make in passing.
+
+- **The three `.erd.json` fixtures are empty and invalid, and want deleting or
+  populating.** `tests/fixtures/README.md` described `reference.erd.json` as 120 entities
+  used by "all NFR-1.x performance budgets"; it has none, and no top-level `id`, so
+  importing it is rejected outright. Nothing reads any of them — the budgets come from
+  `referenceSchema()` inside `tests/perf/layout.perf.test.ts`. The README now says so, but
+  the files are still there. Either populate them from that generator, or delete them and
+  point the README at the generator.
 
 - **~~The SRS status table is stale on FR-8.1/FR-8.2.~~ Done** — those rows and §13 now read
   correctly. The auto-layout rows (FR-3.1, FR-3.2, FR-3.4, FR-6.8, NFR-1.4) were corrected
@@ -388,6 +638,29 @@ Driving it:
   `window`, rather than reading the DOM from the driver after a `waitForTimeout`.
 - **Look at the image.** Every image-export bug found produced a valid file of the right
   size with the right background colour. Byte counts and dimensions prove nothing.
+
+Loading a schema of your own:
+
+- **`importFile` in `tests/e2e/helpers.ts` takes a filename and a string**, deletes
+  `showOpenFilePicker` so Playwright can drive the `<input type="file">` fallback, and
+  clicks through the dialog. A driver script can do the same with
+  `fc.setFiles({ name, mimeType, buffer })` — no temp file needed.
+- **A `.erd.json` needs `id`, `createdAt` and `updatedAt`** at the top level as well as
+  `entities`/`relationships`, or the import is rejected. The checked-in fixtures do not have
+  them.
+- **Measure boxes with `offsetWidth`/`offsetHeight`, not `getBoundingClientRect`.** Nodes
+  sit inside React Flow's scaled viewport, so the client rect is screen pixels while
+  `offset*` is the pre-transform layout size — the same unit ELK and `measure.ts` work in.
+  Positions come from `style.transform`, which is also pre-scale.
+- **Culling breaks any "count all the boxes" measurement.** `onlyRenderVisibleElements`
+  means off-screen nodes are absent from the DOM, so an overlap sweep sees only what is
+  framed — 7 of 41 before fitting the view, 25 after. Click
+  `.react-flow__controls-fitview` and use a tall window, and treat the count as a floor.
+- **Pin the detail level before measuring.** Box heights depend on the LOD the layout ran
+  at, and LOD follows zoom unless the Detail select is set explicitly.
+- **For main-thread blocking, use a `longtask` PerformanceObserver** inside the page. It
+  reports exactly what NFR-1.4 is worded against, which wall-clock timing around a click
+  does not.
 
 Interaction-specific, learned while fixing click-to-select:
 

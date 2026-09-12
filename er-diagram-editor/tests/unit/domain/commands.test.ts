@@ -103,6 +103,38 @@ describe('entity commands', () => {
     expectSaveable(stack.state)
   })
 
+  it('adds an entity at a position when given one', () => {
+    const product = createEntity({ name: 'PRODUCT' })
+
+    stack.execute(addEntity(product, { x: 420, y: 240 }))
+
+    expect(stack.state.layout.positions[product.id]).toEqual({ x: 420, y: 240 })
+    expectSaveable(stack.state)
+  })
+
+  it('undoes the entity and its position as one step', () => {
+    // The position rides on the add command rather than a `moveEntities` beside it
+    // precisely so this holds: one undo removes the box, it does not leave it behind at
+    // the origin.
+    const product = createEntity({ name: 'PRODUCT' })
+    stack.execute(addEntity(product, { x: 420, y: 240 }))
+
+    stack.undo()
+
+    expect(stack.state.entities.map((entity) => entity.name)).not.toContain('PRODUCT')
+    expect(stack.state.layout.positions[product.id]).toBeUndefined()
+  })
+
+  it('leaves an entity unpositioned when no position is given', () => {
+    // Bulk import relies on this: auto-layout runs straight afterwards and would
+    // overwrite anything written here.
+    const product = createEntity({ name: 'PRODUCT' })
+
+    stack.execute(addEntity(product))
+
+    expect(stack.state.layout.positions[product.id]).toBeUndefined()
+  })
+
   it('renames an entity', () => {
     stack.execute(updateEntity(f.customer.id, { name: 'CLIENT' }))
 

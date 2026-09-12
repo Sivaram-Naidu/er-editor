@@ -136,7 +136,76 @@ test('hovering a table traces its neighbourhood and pushes the rest back', async
 
   // CUSTOMER and its one-hop neighbour ORDER.
   await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
-  await expect(page.locator('.erd-node[data-dimmed]')).toHaveCount(2)
+
+  /*
+   * The other two recede, and the assertion is on the RENDERED opacity rather than on a
+   * `data-dimmed` attribute, because there is no longer one to count. Dimming used to be a
+   * per-node boolean, which made starting a hover an O(N) state change — every box that is
+   * NOT traced had to be rebuilt to say so. It is now one `data-tracing` flag on the
+   * canvas and a `:not([data-traced])` rule in CSS.
+   *
+   * Asserting the computed style is the point: an attribute could be renamed or a selector
+   * could stop matching and the diagram would quietly stop dimming, which is a visual
+   * regression no attribute count would catch.
+   */
+  await expect(page.locator('.erd-canvas[data-tracing]')).toHaveCount(1)
+
+  /*
+   * POLLED, because opacity is TRANSITIONED (`--erd-trace-duration`, canvas.css). A bare
+   * read lands mid-fade and reports something close to 1, which is what the first version
+   * of this did — it failed three runs out of three while the screenshot plainly showed
+   * two dimmed boxes. `expect.poll` retries until the transition has landed; a
+   * `waitForTimeout` would pass here and rot the moment the duration changed.
+   */
+  await expect
+    .poll(
+      async () =>
+        page.locator('.erd-scrim').evaluate((scrim) => Number(getComputedStyle(scrim).opacity)),
+      { message: 'the scrim did not fade in, so nothing is receding' },
+    )
+    .toBeGreaterThan(0.1)
+
+  /*
+   * And it is dimming the RIGHT things, which is the half a single opacity reading cannot
+   * see. The scrim only works because it sits between the untraced boxes and the traced
+   * ones in the viewport's stacking context — get that wrong and it either dims nothing or
+   * dims the traced path along with everything else, both of which leave its own opacity
+   * looking perfectly correct.
+   */
+  const bands = await page.evaluate(() => {
+    const z = (selector: string): number =>
+      Number(getComputedStyle(document.querySelector(selector)!).zIndex)
+    return {
+      scrim: z('.erd-scrim'),
+      traced: z('.react-flow__node:has(.erd-node[data-traced])'),
+      untraced: z('.react-flow__node:not(:has(.erd-node[data-traced]))'),
+    }
+  })
+  expect(bands.untraced, 'untraced boxes must sit BEHIND the scrim').toBeLessThan(bands.scrim)
+  expect(bands.traced, 'traced boxes must sit IN FRONT of the scrim').toBeGreaterThan(bands.scrim)
+
+  // At rest it is invisible, so it can stay mounted and cost a composite rather than a
+  // React commit per hover.
+  await page.mouse.move(4, 400)
+  await expect
+    .poll(async () =>
+      page.locator('.erd-scrim').evaluate((scrim) => Number(getComputedStyle(scrim).opacity)),
+    )
+    .toBe(0)
+
+  /*
+   * And the connectors off the path drop their labels, while the traced one keeps its.
+   *
+   * Worth asserting separately because the label is NOT inside the edge it belongs to:
+   * `EdgeLabelRenderer` portals it into React Flow's own label layer, so every selector
+   * that descends from `.erd-edge` misses it. The first version of the CSS rule did
+   * exactly that and the dimmed labels stayed on screen — caught by looking at a
+   * screenshot, which no count of nodes would have shown.
+   */
+  await page.mouse.move(point.x, point.y)
+  await expect(page.locator('.erd-node[data-traced]')).toHaveCount(2)
+  await expect(page.locator('.erd-edge__label:visible')).toHaveCount(1)
+  await expect(page.locator('.erd-edge__label[data-traced]')).toBeVisible()
 })
 
 test('dragging a table moves it, follows the cursor, and is one undo step', async ({ page }) => {

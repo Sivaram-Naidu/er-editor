@@ -26,7 +26,12 @@ export function attachAutosave(options: AttachAutosaveOptions): AutosaveHandle {
     repository,
     ...(options.delayMs === undefined ? {} : { delayMs: options.delayMs }),
     onStateChange: (state) => {
+      // Both terminal states are forwarded. Reporting only success is what leaves a
+      // failed save looking identical to a slow one — see `saveError` on the store.
       if (state.status === 'saved') store.getState().markSaved()
+      else if (state.status === 'error') {
+        store.getState().markSaveFailed(state.error ?? 'Could not save to this browser.')
+      }
     },
   })
 

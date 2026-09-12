@@ -7,6 +7,7 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  ViewportPortal,
   type Connection,
   type Edge,
   type Node,
@@ -36,6 +37,7 @@ import {
   inFlightPositions,
   measuredDimensions,
   overlayNodes,
+  reuseUnchanged,
   settledPositions,
   sizesUnchanged,
   traceSets,
@@ -122,6 +124,9 @@ export interface CanvasProps {
 
 const NO_SEVERITIES: ReadonlyMap<string, Severity> = new Map()
 
+/** Shared for the same reason as `NOTHING_TRACED` in trace.ts — see the note there. */
+const NO_TRACED_ATTRIBUTES: ReadonlySet<AttributeId> = new Set()
+
 function CanvasInner(props: CanvasProps): React.ReactElement {
   const { diagram, lod, hoveredEntityId, hoveredRelationshipId } = props
   const { onMoveEntities } = props
@@ -161,26 +166,58 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
 
   const isTracing = traced.entities.size > 0 || traced.relationships.size > 0
 
-  const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
-    // Which attribute rows sit on the traced path, so an FK row can be picked out rather
-    // than the whole box (FR-4.5).
-    const tracedAttributeIds = new Set<AttributeId>()
-    if (isTracing) {
-      for (const entity of diagram.entities) {
-        for (const attribute of entity.attributes) {
-          const fk = attribute.foreignKey
-          if (fk !== undefined && traced.entities.has(fk.entityId)) {
-            tracedAttributeIds.add(attribute.id)
-          }
+  /**
+   * Which attribute rows sit on the traced path, so an FK row can be picked out rather
+   * than the whole box (FR-4.5) — as one set PER ENTITY, not one set for the diagram.
+   *
+   * The split is the point. A single shared Set has a new identity on every hover, so
+   * every node's `data` carried a new `tracedAttributeIds` reference, `sameEntityNode`
+   * returned false for all of them, and all 120 boxes redrew every row to highlight a
+   * handful. Per entity, the few boxes with a traced FK row get a new Set and every other
+   * box keeps the SHARED empty one, whose identity never changes.
+   *
+   * Entities with no traced rows are deliberately ABSENT from the Map rather than mapped
+   * to an empty Set, so the lookup below falls through to `NO_TRACED_ATTRIBUTES` and the
+   * stability is by construction rather than by remembering to reuse a constant here.
+   *
+   * Still memoised on `diagram.entities` rather than on `diagram`: moving a box produces
+   * a new `Diagram` but the SAME `entities` array — Immer only copies the path it
+   * mutated, and `applyLayout` touches `layout.positions` — so a position change does not
+   * disturb any of this.
+   */
+  const tracedAttributesByEntity = useMemo(() => {
+    const byEntity = new Map<EntityId, ReadonlySet<AttributeId>>()
+    if (!isTracing) return byEntity
+
+    for (const entity of diagram.entities) {
+      let ids: Set<AttributeId> | undefined
+      for (const attribute of entity.attributes) {
+        const fk = attribute.foreignKey
+        if (fk !== undefined && traced.entities.has(fk.entityId)) {
+          ids ??= new Set<AttributeId>()
+          ids.add(attribute.id)
         }
       }
+      if (ids !== undefined) byEntity.set(entity.id, ids)
     }
+    return byEntity
+  }, [diagram.entities, isTracing, traced])
 
-    // "CUSTOMER.id" for every foreign key, resolved once per diagram change. An FK badge
-    // that only says "FK" is a marker rather than information — the question in a large
-    // schema is always "referencing what?".
-    const foreignKeyTargets = new Map<AttributeId, string>()
-    const { entityById } = indexOf(diagram)
+  /**
+   * "CUSTOMER.id" for every foreign key. An FK badge that only says "FK" is a marker
+   * rather than information — the question in a large schema is always "referencing
+   * what?".
+   *
+   * Keyed on `diagram.entities` for the same reason as above: this is derived from
+   * entities alone, so rebuilding it when a position changes would hand every node a new
+   * Map and re-render every row for a move. That is also why the entity lookup is built
+   * here rather than taken from `indexOf(diagram)` — that index is cached on the Diagram
+   * OBJECT, so a position change misses the cache and rebuilds all four of its maps.
+   */
+  const foreignKeyTargets = useMemo(() => {
+    const targets = new Map<AttributeId, string>()
+    const entityById = new Map(diagram.entities.map((entity) => [entity.id, entity]))
+
     for (const entity of diagram.entities) {
       for (const attribute of entity.attributes) {
         const fk = attribute.foreignKey
@@ -188,14 +225,14 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         const target = entityById.get(fk.entityId)
         const column = target?.attributes.find((candidate) => candidate.id === fk.attributeId)
         if (target !== undefined && column !== undefined) {
-          foreignKeyTargets.set(
-            attribute.id,
-            `${target.name || 'unnamed'}.${column.name || 'unnamed'}`,
-          )
+          targets.set(attribute.id, `${target.name || 'unnamed'}.${column.name || 'unnamed'}`)
         }
       }
     }
+    return targets
+  }, [diagram.entities])
 
+  const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
     return diagram.entities.map((entity, index) => ({
       id: entity.id,
       type: 'entity',
@@ -205,8 +242,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         entity,
         lod,
         isTraced: traced.entities.has(entity.id),
-        isDimmed: isTracing && !traced.entities.has(entity.id),
-        tracedAttributeIds,
+        tracedAttributeIds: tracedAttributesByEntity.get(entity.id) ?? NO_TRACED_ATTRIBUTES,
         selectedAttributeId: props.selectedAttributeId,
         foreignKeyTargets,
         editable: props.editable,
@@ -217,7 +253,8 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     diagram,
     lod,
     traced,
-    isTracing,
+    tracedAttributesByEntity,
+    foreignKeyTargets,
     props.selectedEntityIds,
     props.selectedAttributeId,
     props.editable,
@@ -230,13 +267,61 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
    * `overlayNodes` lives in trace.ts, next to the three extractors that feed it, because
    * the assertion worth making is about the whole pipeline rather than any one part of it.
    */
-  const nodes = useMemo<Node<EntityNodeData>[]>(() => {
+  const overlaid = useMemo<Node<EntityNodeData>[]>(() => {
     if (Object.keys(dragged).length === 0 && Object.keys(measured).length === 0) {
       return baseNodes
     }
 
     return overlayNodes(baseNodes, dragged, measured)
   }, [baseNodes, dragged, measured])
+
+  /*
+   * WHAT REACT FLOW IS ALREADY HOLDING, SO THE UNCHANGED NODES CAN BE HANDED BACK
+   *
+   * `reuseUnchanged` needs the previous array, and the obvious home for it — a ref — is
+   * not available: `react-hooks/refs` forbids reading or writing one during render, and it
+   * is right to, because a ref read during render can leave the output disagreeing with
+   * what React committed.
+   *
+   * So it is state, adjusted DURING render rather than in an effect. That is the same
+   * pattern `InlineName` uses to re-sync a draft, and it is in CLAUDE.md for the same
+   * reason: an effect would commit the un-reused array first and correct it on a second
+   * pass, which is the cascading render `react-hooks/set-state-in-effect` exists to stop.
+   *
+   * It converges in one extra pass of this component and no more. On the second pass the
+   * memo above is a cache hit, so `overlaid` is the same array; every node in it then
+   * matches the one just stored; `reuseUnchanged` returns that stored array unchanged; and
+   * the condition below is false. Children render once, with the final array.
+   *
+   * ── AND WHY SELECTION IS EXEMPT FROM ALL OF IT ──────────────────────────────────────
+   *
+   * `adoptUserNodes` keeping a node's internals on reference equality is the whole reason
+   * reuse works — and those internals INCLUDE `selected`. React Flow maintains its own idea
+   * of what is selected as well as reading ours, and the two disagree routinely: Shift is
+   * React Flow's marquee key, not its multi-select key, so it treats a shift-click as a
+   * plain one and internally deselects everything else. This app treats it as "add to the
+   * selection" (FR-2.7), and the store is the authority.
+   *
+   * While every node object was rebuilt on every render, our `selected` was re-asserted
+   * constantly and React Flow's private opinion never survived a frame. Reuse silences
+   * that: hand back the same object and the library keeps its own answer. Shift-clicking a
+   * second table left one box highlighted while the store held two — the model was right
+   * and only the view was stale, which is the hardest version of this to notice.
+   *
+   * So a render in which the selection changed rebuilds every node, deliberately. It is
+   * the render where being right matters and the one place the saving is not worth having:
+   * a selection change is one per click, where a hover is one per pointer frame.
+   */
+  const [held, setHeld] = useState<{
+    selection: ReadonlySet<EntityId>
+    nodes: Node<EntityNodeData>[]
+  }>({ selection: props.selectedEntityIds, nodes: overlaid })
+
+  const selectionMoved = held.selection !== props.selectedEntityIds
+  const nodes = selectionMoved ? overlaid : reuseUnchanged(held.nodes, overlaid)
+  if (selectionMoved || nodes !== held.nodes) {
+    setHeld({ selection: props.selectedEntityIds, nodes })
+  }
 
   const edges = useMemo<Edge<RelationshipEdgeData>[]>(() => {
     const { entityById } = indexOf(diagram)
@@ -251,19 +336,27 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
           type: 'relationship',
           source: from.entityId,
           target: to.entityId,
+          /*
+           * Only a TRACED connector is lifted over the scrim (see the note on
+           * `ViewportPortal` below). Lifting the whole `.react-flow__edges` layer instead
+           * was tried and looked wrong: every connector then drew ON TOP of every untraced
+           * box, so the diagram filled with lines crossing through tables. Untraced edges
+           * stay under the scrim and are dimmed by it, which costs them the slightly
+           * lighter dim they used to get and is worth it for keeping edges behind boxes.
+           */
+          ...(traced.relationships.has(relationship.id) ? { zIndex: 2 } : {}),
           data: {
             relationship,
             sourceName: entityById.get(from.entityId)?.name ?? '',
             targetName: entityById.get(to.entityId)?.name ?? '',
             isTraced: traced.relationships.has(relationship.id),
-            isDimmed: isTracing && !traced.relationships.has(relationship.id),
             issueSeverity: issueSeverityByRelationship.get(relationship.id),
           },
           selected: props.selectedRelationshipIds.has(relationship.id),
         },
       ]
     })
-  }, [diagram, traced, isTracing, props.selectedRelationshipIds, issueSeverityByRelationship])
+  }, [diagram, traced, props.selectedRelationshipIds, issueSeverityByRelationship])
 
   /** Handle ids are `<attributeId>-source` / `-target`; box handles have no id. */
   const attributeIdFromHandle = (handle: string | null | undefined): AttributeId | undefined => {
@@ -315,7 +408,21 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
   )
 
   return (
-    <div className="erd-canvas">
+    /*
+     * ONE FLAG FOR "SOMETHING IS TRACED", AND THE DIMMING IS CSS FROM HERE DOWN.
+     *
+     * Everything off the traced path recedes (FR-4.1), which used to be a per-element
+     * `isDimmed` boolean in `node.data` and `edge.data`. That made dimming an O(N) state
+     * change: starting a hover flipped the flag on all N-1 boxes that are NOT traced, so
+     * every node object and every edge object was rebuilt to express a fact about the
+     * diagram as a whole rather than anything about a particular box.
+     *
+     * `.erd-canvas[data-tracing] .erd-node:not([data-traced])` says the same thing with
+     * one attribute on one div, and leaves `isTraced` — which really is per-box, and
+     * really does change for only the handful on the path — as the only trace state a node
+     * carries. See canvas.css.
+     */
+    <div className="erd-canvas" data-tracing={isTracing || undefined}>
       <CrowsFootMarkers />
       <ReactFlow
         nodes={nodes}
@@ -386,6 +493,31 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
          * a missing end. React Flow already prevents those, so nothing is rejected here. */
         deleteKeyCode={null}
       >
+        {/*
+          * DIMMING, DONE ONCE INSTEAD OF ONCE PER BOX (NFR-1.3).
+          *
+          * `.erd-canvas[data-tracing] .erd-node:not([data-traced])` used to set an opacity
+          * on every untraced box, which at 120 entities and L2 repaints 111 boxes and
+          * ~1,900 attribute rows. Measured on the production build: a cold click blocked
+          * the main thread for 159 ms, of which 148 ms was paint — and neutralising the
+          * dimming rule alone took the whole gesture from 191 ms to 117 ms. One overlay
+          * costs a composite instead, and lands at 118 ms, i.e. on the ceiling that
+          * removing the dimming outright defines.
+          *
+          * It has to be INSIDE the viewport, and that is what `ViewportPortal` is for.
+          * `.react-flow__viewport` carries a transform, so it is the only stacking context
+          * here; `.react-flow__edges` and `.react-flow__nodes` are both `z-index: auto` and
+          * create none, so every edge and every node wrapper competes directly in it. That
+          * is what lets one element sit between untraced boxes (z 0) and traced ones (z 5).
+          *
+          * Mounted always rather than only while tracing: a mount per hover is a commit per
+          * hover, which is the cost this is removing. `data-tracing` drives its opacity, so
+          * it is invisible at rest and never renders on the export surface, which passes no
+          * hover state at all.
+          */}
+        <ViewportPortal>
+          <div className="erd-scrim" />
+        </ViewportPortal>
         <SurfaceObserver onResize={props.onPaneResize} onNodesMeasured={props.onNodesMeasured} />
         <RevealController request={props.revealRequest} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--erd-grid)" />

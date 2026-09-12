@@ -18,6 +18,7 @@ export {
   ZOOM_MIN,
   createViewportStore,
   useViewportStore,
+  viewportCenter,
   type ViewportState,
   type ViewportStore,
 } from './viewportStore'

@@ -1,0 +1,159 @@
+/* The problems strip under the canvas, and its toolbar toggle.
+ *
+ * Same instrument-beside-the-drawing restraint as the inspector: no cards, no shadows.
+ * Severity is carried by a glyph and a word as well as a colour, never by colour alone
+ * (NFR-4.4), and the two severity hues are the palette's existing danger and warning
+ * tokens rather than new ones — the one saturated blue stays reserved for the traced
+ * path.
+ */
+
+.erd-issues {
+  flex-shrink: 0;
+  /* Tall enough for a heading and about five issues, which is where a real diagram's
+   * list usually sits. Beyond that it scrolls rather than eating the canvas. */
+  max-height: 34vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--erd-panel);
+  border-top: 1px solid var(--erd-rule);
+  font-size: var(--erd-text-sm);
+}
+
+.erd-issues__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--erd-space-3);
+  padding: var(--erd-space-2) var(--erd-space-3);
+  border-bottom: 1px solid var(--erd-rule);
+}
+
+.erd-issues__title {
+  margin: 0;
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.erd-issues__close {
+  margin-left: auto;
+}
+
+.erd-issues__body {
+  overflow-y: auto;
+  padding: var(--erd-space-2) 0;
+}
+
+.erd-issues__empty {
+  margin: 0;
+  color: var(--erd-ink-muted);
+  /* The clean-diagram sentence is long on purpose — it says what WAS checked, which is
+   * the only way an empty list can be reassuring rather than ambiguous. */
+  max-width: 68ch;
+}
+
+.erd-issues__empty--counts {
+  font-variant-numeric: tabular-nums;
+}
+
+.erd-issues__tier + .erd-issues__tier {
+  margin-top: var(--erd-space-3);
+}
+
+.erd-issues__heading {
+  margin: 0;
+  padding: 0 var(--erd-space-3) var(--erd-space-1);
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+}
+
+.erd-issues__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--erd-ink-faint);
+}
+
+.erd-issues__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.erd-issues__go {
+  display: flex;
+  align-items: baseline;
+  gap: var(--erd-space-2);
+  width: 100%;
+  padding: var(--erd-space-1) var(--erd-space-3);
+  border: 0;
+  background: none;
+  color: var(--erd-ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.erd-issues__go:hover {
+  background: var(--erd-node-header);
+}
+
+.erd-issues__badge {
+  flex-shrink: 0;
+  width: 1.25em;
+  height: 1.25em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--erd-radius);
+  font-size: var(--erd-text-xs);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--erd-paper);
+}
+
+.erd-issues__go[data-severity='error'] .erd-issues__badge {
+  background: var(--erd-danger);
+}
+
+.erd-issues__go[data-severity='warning'] .erd-issues__badge {
+  background: var(--erd-warning);
+}
+
+.erd-issues__go[data-severity='info'] .erd-issues__badge {
+  background: var(--erd-rule-strong);
+}
+
+.erd-issues__message {
+  /* Prose, so it gets a measure. This is the reason the panel is horizontal. */
+  max-width: 96ch;
+}
+
+/* ── The toolbar toggle ───────────────────────────────────────────────────── */
+
+.erd-validation-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--erd-space-2);
+}
+
+.erd-validation-toggle__badge {
+  min-width: 1.4em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  font-size: var(--erd-text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-align: center;
+  color: var(--erd-paper);
+  background: var(--erd-rule-strong);
+}
+
+.erd-validation-toggle__badge[data-severity='error'] {
+  background: var(--erd-danger);
+}
+
+.erd-validation-toggle__badge[data-severity='warning'] {
+  background: var(--erd-warning);
+}

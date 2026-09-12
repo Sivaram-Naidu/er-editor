@@ -11,6 +11,7 @@ export {
   inFlightPositions,
   measuredDimensions,
   overlayNodes,
+  reuseUnchanged,
   settledPositions,
   sizesUnchanged,
   traceSets,
