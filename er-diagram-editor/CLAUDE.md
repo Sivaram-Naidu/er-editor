@@ -31,10 +31,14 @@ pnpm test:e2e      # 16 specs on the system Chrome, ~40s. No browser install nee
 `pnpm verify` must pass. Do not weaken a lint rule, a type, or a coverage threshold to
 make it pass — those have caught real bugs repeatedly (see "Things that have gone wrong").
 
-**Run git from the repository root, one level up.** There is a second, stale `.git` inside
-`er-diagram-editor/`, frozen at a single old commit. Git commands run from this directory
-talk to that one: `git status` claims almost everything is modified, and `git checkout --
-<file>` silently reverts a file to months-old content. `cd ..` first, or use `git -C`.
+**The repository root is `Er_tool/`, one level up — git works from anywhere now.** There
+used to be a second, stale `.git` inside `er-diagram-editor/`, frozen at a single old
+commit, and git run from this directory talked to THAT one: `git status` claimed almost
+everything was modified, and `git checkout -- <file>` silently reverted a file to
+months-old content. It did exactly that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25
+lines. **Deleted 12 Sep 2026**, after verifying every one of the 216 files it tracked was
+also tracked by the real repo. If an editor or a tool ever reports ~126 modified files
+here again, a second `.git` has come back — look for it before believing the count.
 
 ## Architecture, and the rule that enforces it
 

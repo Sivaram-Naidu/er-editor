@@ -537,15 +537,17 @@ In order:
 
 ## Housekeeping worth doing while nearby
 
-- **There are TWO git repositories here, and the inner one is stale.** The real repo is at
-  `Er_tool/` (branch `fix/auto-layout-worker`, current history); `er-diagram-editor/` also
-  has its own `.git`, stuck at a single commit "ER diagram editor: V1 through Stage 11".
-  A `git` command run from inside `er-diagram-editor/` therefore talks to the STALE repo:
-  `git status` reports almost every file as modified, and — the part that actually bites —
-  `git checkout -- <file>` silently reverts the file to months-old content. It did exactly
-  that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25 lines including the whole
-  `UseAutoLayoutRequest` fix. Run git from `Er_tool/`, or use `git -C`. The inner `.git`
-  wants deleting, but that is not a change to make in passing.
+- **~~There are TWO git repositories here, and the inner one is stale.~~ Deleted 12 Sep
+  2026.** `er-diagram-editor/` had its own `.git` stuck at a single commit "ER diagram
+  editor: V1 through Stage 11", so git run from inside this directory talked to the STALE
+  repo: `git status` reported almost every file as modified (126 of them, which is how it
+  finally got noticed — an editor with this folder as its workspace root showed the count),
+  and `git checkout -- <file>` silently reverted a file to months-old content. It did
+  exactly that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25 lines including the whole
+  `UseAutoLayoutRequest` fix. Removed after checking that all 216 files it tracked were also
+  tracked by the real repo at `Er_tool/`. Git now resolves to `Er_tool/` from anywhere in
+  the tree, and `cd ..` / `git -C` are no longer needed. **If a tool ever reports ~126
+  modified files here again, a second `.git` is back — check for one before believing it.**
 
 - **`useGoToIssue` is misnamed, and `features/search` now imports it from
   `features/validation-panel`.** It is not issue-specific in anything but its name — it
