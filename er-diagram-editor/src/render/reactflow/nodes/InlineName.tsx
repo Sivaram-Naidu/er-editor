@@ -60,9 +60,18 @@ export function InlineName(props: InlineNameProps): React.ReactElement {
         }}
         onBlur={commit}
         onKeyDown={(event) => {
-          // Stop the canvas keymap seeing these: `e` would add an entity mid-word, and
-          // Delete would remove the node being renamed.
-          event.stopPropagation()
+          /*
+           * Stop the canvas keymap seeing these: `e` would add an entity mid-word, and
+           * Delete would remove the node being renamed.
+           *
+           * A MODIFIER CHORD IS LET THROUGH, because it is not a character anybody is
+           * typing. Ctrl+K has to open the palette from here — a name field is one of the
+           * places someone most wants to jump away from — and the Editor's keymap puts
+           * that branch above its own typing guard for the same reason. The other chords
+           * are unaffected: Ctrl+Z reaches the keymap and is turned away by that guard, so
+           * undo inside the field stays the browser's, which is what it should be.
+           */
+          if (!event.ctrlKey && !event.metaKey) event.stopPropagation()
           if (event.key === 'Enter') commit()
           if (event.key === 'Escape') {
             setDraft(props.value)

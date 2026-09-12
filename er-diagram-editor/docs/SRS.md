@@ -180,7 +180,7 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 | FR-2.3  | P0       | "Fit to view" (`Shift+1`) and "zoom to selection" (`Shift+2`) commands. Current zoom percentage is displayed and directly editable.                                                                                        | Partial — controls only; no keyboard shortcut                  |
 | FR-2.4  | P0       | Zoom-driven level of detail per §2.2, with a manual override to force L0/L1/L2 globally.                                                                                                                                   | Done                                                           |
 | FR-2.5  | P0       | A minimap in a canvas corner shows the whole diagram, the current viewport rectangle, and supports click-to-jump and drag-to-pan. Collapsible.                                                                             | Done                                                           |
-| FR-2.6  | P0       | A search box (`Ctrl+K`) does fuzzy matching over entity names, attribute names, and relationship names. Selecting a result pans and zooms to the target and selects it. Results show which entity an attribute belongs to. | **Open — next priority**                                       |
+| FR-2.6  | P0       | A search box (`Ctrl+K`) does fuzzy matching over entity names, attribute names, and relationship names. Selecting a result pans and zooms to the target and selects it. Results show which entity an attribute belongs to. | **Done** — `features/search`; matching in `lib/fuzzy.ts`, no library |
 | FR-2.7  | P1       | Entities can be individually pinned to full detail regardless of zoom level.                                                                                                                                               | Partial — model and renderer support pins; no UI control       |
 | FR-2.8  | P1       | "Isolate" mode: with an entity selected, entities more than N hops away are hidden or heavily dimmed. N adjustable 1–3.                                                                                                    | Partial — traversal written and tested; not wired to a control |
 | FR-2.9  | P1       | Marquee (rubber-band) multi-select and shift-click additive selection.                                                                                                                                                     | Open                                                           |
@@ -262,7 +262,7 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 | ID     | Priority | Requirement                                                                                             | Status                       |
 | ------ | -------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
 | FR-9.1 | P0       | Keyboard shortcut reference accessible via `?`.                                                         | Open                         |
-| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    | **Open** — pairs with FR-2.6 |
+| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    | **Done** — every toolbar command, including all four Detail levels and all three themes |
 | FR-9.3 | P1       | Light and dark themes, following system preference by default.                                          | Done                         |
 | FR-9.4 | P1       | An onboarding sample schema loadable in one click, plus an empty-state canvas with clear first actions. | Done                         |
 | FR-9.5 | P2       | Installable as a PWA with full offline capability.                                                      | Open (V2)                    |
@@ -382,8 +382,8 @@ Everything below is open source and permissively licensed except where noted.
 | Styling              | Tailwind CSS 4                             | MIT        |
 | Primitives           | Radix UI                                   | MIT        |
 | Icons                | Lucide                                     | ISC        |
-| Fuzzy search         | Fuse.js                                    | Apache-2.0 |
-| Command palette      | cmdk                                       | MIT        |
+| Fuzzy search         | none — `src/lib/fuzzy.ts`                  | —          |
+| Command palette      | none — `ui/Dialog` (Radix) + `features/search` | —      |
 | Mermaid preview      | mermaid (lazy-loaded, dev/preview only)    | MIT        |
 | Raster/vector export | html-to-image                              | MIT        |
 | Unit tests           | Vitest + Testing Library                   | MIT        |
@@ -605,7 +605,7 @@ er-diagram-tool/
 │   │   ├── editor/                    #   toolbar, canvas shell, context menus, shortcuts
 │   │   ├── inspector/                 #   right panel property editors (FR-1.8)
 │   │   ├── palette/                   #   add-entity / add-relationship affordances
-│   │   ├── search/                    #   Fuse.js index + cmdk palette (FR-2.6, FR-9.2)
+│   │   ├── search/                    #   Ctrl+K palette; matcher in lib/fuzzy (FR-2.6, FR-9.2)
 │   │   ├── minimap/                   #   FR-2.5 wrapper + collapse state
 │   │   ├── validation-panel/          #   FR-8.1
 │   │   ├── export/                    #   dialog, preview, loss report (FR-6.1–6.3)
@@ -821,13 +821,12 @@ rows below that had to be corrected on 10 Sep 2026 are what happens when that sl
    `src/domain/validation/rules/`, the panel and toggle in
    `src/features/validation-panel/`, 69 tests. Clicking an issue selects and reveals the
    element (`useGoToIssue`).
-3. **Search and command palette (FR-2.6, FR-9.2).** At 100 tables this is worth more than
-   everything below it — and SQL import now genuinely makes 100-table diagrams reachable
-   in one click. `fuse.js` and `cmdk` were installed for this and have now been removed again:
-   they sat unused through six stages, and an unused dependency is a supply-chain and
-   audit cost with nothing on the other side of the ledger. Reinstate them when the work
-   starts, or decide then that a substring match over a hundred table names does not need
-   a fuzzy-search library.
+3. ~~**Search and command palette (FR-2.6, FR-9.2).**~~ **Done 12 Sep 2026.** Neither
+   `fuse.js` nor `cmdk` was reinstated, and the numbers are why: the corpus is one
+   diagram's names — 1,230 strings at the 120-entity reference schema, about 3,000 at
+   NFR-2.2's ceiling — and a linear pass over them measures 0.8 ms and 2.0 ms against
+   NFR-1.7's 50 ms budget. The matcher is `src/lib/fuzzy.ts`, ranked in tiers (exact,
+   prefix, acronym, substring, subsequence) because a single tuned score is untestable.
 4. **Edges attaching to the foreign-key row** rather than to box centres. Per-row handles
    exist; the edges ignore them. Needs a fallback for L0 and L1, where those handles are
    not rendered.

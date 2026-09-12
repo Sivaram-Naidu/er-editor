@@ -1,0 +1,101 @@
+/* The Ctrl+K palette (FR-2.6, FR-9.2). */
+
+.erd-palette {
+  display: flex;
+  flex-direction: column;
+  gap: var(--erd-space-3);
+  /* The panel above is `overflow-y: auto`, so without a floor here a one-result list
+     collapses the dialog to the height of its own heading and the box jumps around as the
+     user types. */
+  min-height: 18rem;
+}
+
+.erd-palette__input {
+  width: 100%;
+  padding: var(--erd-space-2) var(--erd-space-3);
+  font-size: var(--erd-text-md);
+  color: var(--erd-ink);
+  background: var(--erd-paper);
+  border: 1px solid var(--erd-rule-strong);
+  border-radius: var(--erd-radius);
+}
+
+.erd-palette__input:focus-visible {
+  outline: 2px solid var(--erd-signal);
+  outline-offset: 1px;
+}
+
+/*
+ * Its OWN scroll container, not the dialog panel's.
+ *
+ * `.erd-modal__panel` is `max-height: 88vh; overflow-y: auto`, so letting it do the
+ * scrolling would carry the dialog's title and Close button off the top with the results —
+ * and two nested scroll containers make `scrollIntoView({ block: 'nearest' })` on the
+ * active option scroll the wrong one.
+ */
+.erd-palette__list {
+  flex: 1;
+  min-height: 0;
+  max-height: 24rem;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.erd-palette__heading {
+  padding: var(--erd-space-2) var(--erd-space-3) var(--erd-space-1);
+  font-size: var(--erd-text-xs);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.erd-palette__option {
+  display: flex;
+  gap: var(--erd-space-3);
+  align-items: baseline;
+  justify-content: space-between;
+  padding: var(--erd-space-2) var(--erd-space-3);
+  cursor: pointer;
+  border-radius: var(--erd-radius);
+}
+
+.erd-palette__option[data-active] {
+  background: var(--erd-signal-wash);
+}
+
+.erd-palette__option[data-disabled] {
+  color: var(--erd-ink-muted);
+  cursor: default;
+}
+
+.erd-palette__label {
+  /* `min-width: 0` or the flex item refuses to shrink below its content and the meta
+     column is pushed out of the panel — the same rule that makes row truncation work on
+     the canvas. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.erd-palette__label mark {
+  padding: 0;
+  font-weight: 700;
+  color: inherit;
+  background: none;
+}
+
+.erd-palette__meta,
+.erd-palette__hint {
+  flex: none;
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-muted);
+}
+
+.erd-palette__empty {
+  padding: var(--erd-space-3);
+  color: var(--erd-ink-muted);
+}

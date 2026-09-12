@@ -8,18 +8,13 @@
 // command stack: it is not part of the document, and nobody wants Ctrl+Z to change the
 // colour scheme.
 
-import { THEME_KEY, sharedRepository } from '../../persistence'
 import { useUiStore, type Theme } from '../../store'
 
-const OPTIONS: { value: Theme; label: string }[] = [
-  { value: 'system', label: 'System' },
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-]
+import { THEME_OPTIONS, useApplyTheme } from './useApplyTheme'
 
 export function ThemeToggle(): React.ReactElement {
   const theme = useUiStore((state) => state.theme)
-  const setTheme = useUiStore((state) => state.setTheme)
+  const applyTheme = useApplyTheme()
 
   return (
     <label className="erd-field">
@@ -28,14 +23,10 @@ export function ThemeToggle(): React.ReactElement {
         className="erd-select"
         value={theme}
         onChange={(event) => {
-          const next = event.target.value as Theme
-          setTheme(next)
-          // Fire-and-forget: a preference that fails to persist costs the user one
-          // re-pick after a reload, which is not worth blocking the paint for.
-          void sharedRepository().setPreference(THEME_KEY, next)
+          applyTheme(event.target.value as Theme)
         }}
       >
-        {OPTIONS.map((option) => (
+        {THEME_OPTIONS.map((option) => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>

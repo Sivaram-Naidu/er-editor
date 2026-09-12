@@ -58,6 +58,18 @@ export interface DialogProps {
   onClose: () => void
   /** Narrower panel, for dialogs whose content does not need 720px. */
   narrow?: boolean
+  /**
+   * Take focus on open instead of the panel.
+   *
+   * The default below is deliberate and stays the default: focusing the panel means a
+   * screen reader reads the dialog's title before anything else, and the first Tab lands
+   * on the first real control rather than on "Close".
+   *
+   * A dialog whose whole purpose IS one input is the exception. The Ctrl+K palette opens
+   * for someone who is already typing; leaving focus on the panel drops their first
+   * keystroke on the floor. Pass the input's ref and it gets focus instead.
+   */
+  initialFocus?: React.RefObject<HTMLElement | null>
   children: React.ReactNode
 }
 
@@ -95,7 +107,9 @@ export function Dialog(props: DialogProps): React.ReactElement {
              * which is what the hand-rolled version did deliberately. */
             onOpenAutoFocus={(event) => {
               event.preventDefault()
-              contentRef.current?.focus()
+              const wanted = props.initialFocus?.current
+              if (wanted !== undefined && wanted !== null) wanted.focus()
+              else contentRef.current?.focus()
             }}
             /* Give focus back to whatever opened the dialog.
              *

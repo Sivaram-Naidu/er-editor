@@ -5,7 +5,18 @@ import { create, type StoreApi, type UseBoundStore } from 'zustand'
 import type { Notation } from '../domain'
 
 export type Theme = 'light' | 'dark' | 'system'
-export type DialogId = 'export' | 'import' | 'shortcuts' | 'confirmDelete' | undefined
+/*
+ * `'palette'` is the Ctrl+K surface (FR-2.6, FR-9.2), and it lives here rather than on a
+ * flag of its own for one specific reason: the Editor's window-level keymap disables
+ * itself with `if (activeDialog !== undefined) return`. A palette opened through any other
+ * switch would leave that guard unarmed, so `Delete` typed at the search box would delete
+ * the selection behind it — which is the exact bug CLAUDE.md records for the export dialog.
+ *
+ * There WAS another switch: `commandPaletteOpen`, declared here and wired to nothing since
+ * the stage that reserved it. It was removed rather than left as a second, broken-looking
+ * way to open the same thing.
+ */
+export type DialogId = 'export' | 'import' | 'palette' | 'shortcuts' | 'confirmDelete' | undefined
 
 export interface UiState {
   theme: Theme
@@ -13,7 +24,6 @@ export interface UiState {
   inspectorOpen: boolean
   validationPanelOpen: boolean
   minimapOpen: boolean
-  commandPaletteOpen: boolean
   activeDialog: DialogId
 
   setTheme: (theme: Theme) => void
@@ -21,7 +31,6 @@ export interface UiState {
   toggleInspector: () => void
   toggleValidationPanel: () => void
   toggleMinimap: () => void
-  setCommandPaletteOpen: (open: boolean) => void
   openDialog: (dialog: DialogId) => void
   closeDialog: () => void
 }
@@ -35,7 +44,6 @@ export function createUiStore(): UiStore {
     inspectorOpen: true,
     validationPanelOpen: false,
     minimapOpen: true,
-    commandPaletteOpen: false,
     activeDialog: undefined,
 
     setTheme: (theme) => {
@@ -52,9 +60,6 @@ export function createUiStore(): UiStore {
     },
     toggleMinimap: () => {
       set((state) => ({ minimapOpen: !state.minimapOpen }))
-    },
-    setCommandPaletteOpen: (open) => {
-      set({ commandPaletteOpen: open })
     },
     openDialog: (dialog) => {
       set({ activeDialog: dialog })

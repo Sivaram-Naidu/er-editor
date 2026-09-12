@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import {
   coldClick,
@@ -274,4 +274,127 @@ test('the diagram survives a reload (FR-7.2, FR-7.3)', async ({ page }) => {
 
   await expect(entity(page, 'CUSTOMER')).toBeVisible()
   await expect(page.locator('.react-flow__node')).toHaveCount(4)
+})
+
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * THE Ctrl+K PALETTE (FR-2.6, FR-9.2)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * `tests/unit/features/command-palette.test.tsx` already asserts which rows appear and
+ * which store a pick lands in. What is here is the half jsdom cannot reach: a real
+ * Ctrl+K travelling through the Editor's window-level keymap, a real focus trap deciding
+ * where the caret goes, and a camera that actually moves.
+ */
+
+/**
+ * The palette's own input.
+ *
+ * NOT a bare `getByRole('combobox')`: a `<select>` has an implicit combobox role, so the
+ * toolbar's Detail and Theme controls answer to it too and the query resolves to three
+ * elements. It only ever passed by accident — Radix marks the rest of the page
+ * `aria-hidden` once the dialog is open, so whether the other two are in the accessibility
+ * tree depends on how far the open animation has got.
+ */
+function palette(page: Page) {
+  return page.getByRole('combobox', { name: /search/i })
+}
+
+test('Ctrl+K opens the palette with the caret already in the box (FR-9.2)', async ({ page }) => {
+  await openSample(page)
+
+  await page.keyboard.press('Control+k')
+
+  const box = palette(page)
+  await expect(box).toBeVisible()
+  /*
+   * THE ASSERTION THAT EARNED ITS KEEP.
+   *
+   * `ui/Dialog` focuses the PANEL on open, deliberately — a screen reader should hear the
+   * title before anything else. For a palette that is wrong: it opens for someone who is
+   * already typing, so the first keystroke would land nowhere. `Dialog` grew an
+   * `initialFocus` prop for this, and nothing but a real focus trap can tell you whether
+   * it worked.
+   */
+  await expect(box).toBeFocused()
+})
+
+test('Ctrl+K opens the palette even while renaming a table inline', async ({ page }) => {
+  // The Editor's keymap returns early when focus is in an input, so that `e` and `Delete`
+  // do not edit the document while somebody is typing a name. Ctrl+K is deliberately
+  // ABOVE that guard — a chord cannot be typed by accident, and the inspector and the
+  // name field are two of the places a user most wants to jump away from.
+  await openSample(page)
+  await entity(page, 'CUSTOMER').locator('.erd-node__name').dblclick()
+  await expect(page.locator('.erd-inline-input')).toBeFocused()
+
+  await page.keyboard.press('Control+k')
+
+  await expect(palette(page)).toBeFocused()
+})
+
+test('picking a table selects it and moves the camera to it (FR-2.6)', async ({ page }) => {
+  await openSample(page)
+
+  // Park the camera somewhere else first, or "it moved" proves nothing.
+  await page.mouse.move(600, 400)
+  await page.mouse.down()
+  await page.mouse.move(180, 160, { steps: 8 })
+  await page.mouse.up()
+  const before = await page.locator('.react-flow__viewport').getAttribute('style')
+
+  await page.keyboard.press('Control+k')
+  await palette(page).fill('product')
+  await expect(page.getByRole('option').first()).toContainText('PRODUCT')
+  await page.keyboard.press('Enter')
+
+  // The palette closes, the box is selected, and the viewport transform changed.
+  await expect(palette(page)).toHaveCount(0)
+  expect(await selectedIds(page)).toHaveLength(1)
+  await expect(entity(page, 'PRODUCT')).toHaveClass(/selected/)
+  await expect
+    .poll(async () => page.locator('.react-flow__viewport').getAttribute('style'), {
+      message: 'the camera did not move to the picked table',
+    })
+    .not.toBe(before)
+})
+
+test('a field result names its table, and picking it selects both (FR-2.6)', async ({ page }) => {
+  await openSample(page)
+
+  await page.keyboard.press('Control+k')
+  await palette(page).fill('email')
+
+  const row = page.getByRole('option').first()
+  await expect(row).toContainText('email')
+  // "Results show which entity an attribute belongs to" — the requirement says so in words.
+  await expect(row).toContainText('CUSTOMER')
+
+  await page.keyboard.press('Enter')
+  await expect(entity(page, 'CUSTOMER')).toHaveClass(/selected/)
+})
+
+test('Escape closes the palette and leaves the document alone', async ({ page }) => {
+  await openSample(page)
+  const before = await page.locator('.react-flow__node').count()
+
+  await page.keyboard.press('Control+k')
+  await expect(palette(page)).toBeVisible()
+  await page.keyboard.press('Escape')
+
+  await expect(palette(page)).toHaveCount(0)
+  // The keymap is disabled while a dialog is open, so nothing should have reached the
+  // canvas behind it — the export dialog once let `e` add an entity from underneath.
+  expect(await page.locator('.react-flow__node').count()).toBe(before)
+})
+
+test('the palette runs a command, not just a search (FR-9.2)', async ({ page }) => {
+  await openSample(page)
+  const before = await page.locator('.react-flow__node').count()
+
+  await page.keyboard.press('Control+k')
+  await palette(page).fill('add entity')
+  await page.keyboard.press('Enter')
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(before + 1)
 })

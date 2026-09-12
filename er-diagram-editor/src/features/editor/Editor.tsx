@@ -21,13 +21,17 @@ import {
   type Point,
   type RelationshipId,
 } from '../../domain'
+import { type LodLevel } from '../../lib'
 import { measureEntity } from '../../layout'
 import { Canvas, EditorActionsProvider, type EditorActions } from '../../render'
 import { DiagramMenu, useDiagramLibrary } from '../diagram-manager'
 import { ExportDialog } from '../export'
 import { ImportDialog } from '../import'
 import { InspectorPanel } from '../inspector'
+import { CommandPalette, type PaletteCommand } from '../search'
 import { ValidationPanel, ValidationToggle, useValidationReport } from '../validation-panel'
+
+import { THEME_OPTIONS, useApplyTheme } from './useApplyTheme'
 import {
   useDiagramStore,
   useSelectionStore,
@@ -42,6 +46,19 @@ import { placeNewEntity } from './placement'
 import { useAutoLayout } from './useAutoLayout'
 import { Toolbar } from './Toolbar'
 import { buildSampleDiagram } from './sample'
+
+/**
+ * The four Detail choices, as palette commands (FR-9.2).
+ *
+ * The labels match `LOD_LABEL` in Toolbar.tsx, which is the list a user has already seen.
+ * `undefined` is "Follow zoom" — the same value the select writes for its `auto` option.
+ */
+const LOD_COMMANDS: { value: LodLevel | undefined; label: string }[] = [
+  { value: undefined, label: 'Follow zoom' },
+  { value: 0, label: 'Names' },
+  { value: 1, label: 'Keys' },
+  { value: 2, label: 'All fields' },
+]
 
 export function Editor(): React.ReactElement {
   // Each subscription is a narrow selector rather than the whole store. Taking the whole
@@ -217,6 +234,7 @@ export function Editor(): React.ReactElement {
     [execute, selectEntities, selectAttribute],
   )
 
+
   // NFR-3.2: every mouse action is reachable by keyboard.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -226,6 +244,23 @@ export function Editor(): React.ReactElement {
       // it and `Delete` deleted the selection out from under the preview the user was
       // reading.
       if (activeDialog !== undefined) return
+
+      /*
+       * Ctrl+K sits ABOVE the typing guard, and it is the only shortcut that does.
+       *
+       * The guard exists because the bare keys — `e`, `r`, `Delete` — are characters
+       * someone might be typing, and because Ctrl+Z inside a text field is the browser's
+       * undo rather than the document's. Neither applies here: Ctrl+K is a chord, so it
+       * cannot be typed by accident, and it has no native meaning to shadow. Leaving it
+       * below the guard would mean the palette could not be opened from the inspector or
+       * from the diagram-name field, which are two of the places someone is most likely to
+       * be when they want to jump somewhere else.
+       */
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        openDialog('palette')
+        return
+      }
 
       const target = event.target
       const isTyping =
@@ -272,6 +307,7 @@ export function Editor(): React.ReactElement {
     }
   }, [
     activeDialog,
+    openDialog,
     undo,
     redo,
     handleAddEntity,
@@ -281,6 +317,127 @@ export function Editor(): React.ReactElement {
   ])
 
   const autoLayout = useAutoLayout({ diagram, lod: lodOverride ?? lod, execute })
+
+  /*
+   * Every command the toolbar offers, for the Ctrl+K palette (FR-9.2).
+   *
+   * Built HERE rather than in a registry inside `features/search`, because this component
+   * already owns every handler and already computes every disabled condition for the
+   * toolbar. A registry would be a second list to keep in step, and the failure mode is
+   * silent: a command that is greyed out in one place and live in the other.
+   *
+   * The `disabled` flags are the same expressions the Toolbar uses, deliberately — read
+   * them alongside `Toolbar.tsx` rather than re-deriving what ought to disable a command.
+   */
+  const applyTheme = useApplyTheme()
+  const paletteCommands = useMemo<PaletteCommand[]>(
+    () => [
+      { id: 'add-entity', label: 'Add entity', hint: 'E', disabled: false, run: handleAddEntity },
+      {
+        id: 'add-relationship',
+        label: 'Add relationship',
+        hint: 'R',
+        disabled: selectedEntityIds.size !== 2,
+        run: handleAddRelationship,
+      },
+      {
+        id: 'delete',
+        label: 'Delete selection',
+        hint: 'Del',
+        disabled: selectedEntityIds.size + selectedRelationshipIds.size === 0,
+        run: handleDeleteSelection,
+      },
+      {
+        id: 'undo',
+        label: history.undoLabel === undefined ? 'Undo' : `Undo ${history.undoLabel}`,
+        hint: 'Ctrl+Z',
+        disabled: !history.canUndo,
+        run: undo,
+      },
+      {
+        id: 'redo',
+        label: history.redoLabel === undefined ? 'Redo' : `Redo ${history.redoLabel}`,
+        hint: 'Ctrl+Shift+Z',
+        disabled: !history.canRedo,
+        run: redo,
+      },
+      {
+        id: 'auto-layout',
+        label: 'Auto-layout',
+        hint: undefined,
+        disabled: autoLayout.isRunning || diagram.entities.length < 2,
+        run: () => {
+          void autoLayout.run()
+        },
+      },
+      {
+        id: 'import',
+        label: 'Open file…',
+        hint: undefined,
+        disabled: false,
+        run: () => {
+          openDialog('import')
+        },
+      },
+      {
+        id: 'export',
+        label: 'Export…',
+        hint: undefined,
+        disabled: false,
+        run: () => {
+          openDialog('export')
+        },
+      },
+      {
+        id: 'issues',
+        label: validationPanelOpen ? 'Hide issues' : 'Show issues',
+        hint: undefined,
+        disabled: false,
+        run: toggleValidationPanel,
+      },
+      // Detail is the highest-leverage control at 120 tables — it is what decides whether
+      // a box draws its fields — so all four levels are commands rather than one toggle.
+      ...LOD_COMMANDS.map((option) => ({
+        id: `detail-${String(option.value ?? 'auto')}`,
+        label: `Detail: ${option.label}`,
+        hint: undefined,
+        disabled: lodOverride === option.value,
+        run: () => {
+          setLodOverride(option.value)
+        },
+      })),
+      ...THEME_OPTIONS.map((option) => ({
+        id: `theme-${option.value}`,
+        label: `Theme: ${option.label}`,
+        hint: undefined,
+        disabled: false,
+        run: () => {
+          applyTheme(option.value)
+        },
+      })),
+    ],
+    [
+      handleAddEntity,
+      handleAddRelationship,
+      handleDeleteSelection,
+      selectedEntityIds.size,
+      selectedRelationshipIds.size,
+      history.canUndo,
+      history.canRedo,
+      history.undoLabel,
+      history.redoLabel,
+      undo,
+      redo,
+      autoLayout,
+      diagram.entities.length,
+      openDialog,
+      validationPanelOpen,
+      toggleValidationPanel,
+      lodOverride,
+      setLodOverride,
+      applyTheme,
+    ],
+  )
   const library = useDiagramLibrary(diagram.id)
 
   const diagramMenu = (
@@ -401,6 +558,10 @@ export function Editor(): React.ReactElement {
             actually here to look at. */}
         {isEmpty || !hasSelection ? null : <InspectorPanel />}
       </div>
+
+      {activeDialog === 'palette' ? (
+        <CommandPalette diagram={diagram} commands={paletteCommands} onClose={closeDialog} />
+      ) : null}
 
       {activeDialog === 'export' ? <ExportDialog diagram={diagram} onClose={closeDialog} /> : null}
 
