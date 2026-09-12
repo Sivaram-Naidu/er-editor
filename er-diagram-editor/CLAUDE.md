@@ -294,28 +294,29 @@ culling off.
   The lesson is not about `:has()` — it is that a reputation is not a measurement, and that
   putting the OLD code back as an ablation condition is the only way to A/B a change on this
   machine, where medians drift 80 ms between runs with nothing changed.
-- **A diagram-wide dim is one composited layer, not an opacity on every element.**
-  `.erd-canvas[data-tracing] .erd-node:not([data-traced])` set an opacity on all 111
-  untraced boxes, which at L2 repaints them and their ~1,900 rows; a cold click blocked for
-  ~170 ms and most of it was paint. `.erd-scrim` — one div, rendered through React Flow's
-  `ViewportPortal` — now does it by compositing, and lands on the ceiling that removing the
-  dimming outright defines. Three things make it work, and all three are easy to lose:
-  - **It has to be INSIDE the viewport.** `.react-flow__viewport` carries a transform, so it
-    is the only stacking context on the canvas; `.react-flow__edges` and `.react-flow__nodes`
-    are both `z-index: auto` and create none, which is why every edge and node wrapper
-    competes directly in it and one element can sit between untraced boxes (z 0) and traced
-    ones (z 5). Asked of the browser, not read off React Flow's stylesheet — and it is not a
-    contract, so check it again if React Flow's DOM changes.
-  - **Lift only the TRACED edges over it.** Lifting the whole `.react-flow__edges` layer was
-    built first and looked wrong in a way no assertion caught: every connector then drew on
-    top of every untraced table, so the diagram became a grid of lines crossing through
-    boxes. Found by looking at the screenshot.
-  - **An element behind a wash cannot show through more than the wash allows.** Untraced
-    connectors used to keep `--erd-dim-opacity + 0.15` so thin lines survived dimming. Under
-    a scrim that rule dims them twice; it is gone, and they now take the same dim as boxes.
-  - It stays MOUNTED and fades by CSS, because a mount per hover is a commit per hover —
-    which is the cost being removed. It never appears on the export surface, which passes no
-    hover state at all.
+- **An ablation simulated inside the NEW build is not the OLD build, and this canvas proved
+  it the expensive way.** `.erd-scrim` — one composited div through React Flow's
+  `ViewportPortal` — replaced `.erd-canvas[data-tracing] .erd-node:not([data-traced])`, which
+  set an opacity on all 111 untraced boxes and repainted their ~1,900 rows. It was measured
+  as a 195 → 105-119 ms win, with "before" reproduced by restoring the per-node dimming rule
+  and setting `display: none` on the scrim **within the scrim build**. That session even
+  spotted the hazard — an always-present composited layer changes how Chrome layerises the
+  viewport *even when invisible*, and a first attempt measured the "before" 46 ms too fast —
+  and tried to correct for it with `display: none`. The correction was not enough.
+  Re-measured against the real pre-scrim COMMIT with the same unchanged `perf.spec.ts`, the
+  scrim is a **regression**: cold-click median 105 ms → 156 ms, blocked 97 ms → 153 ms,
+  reproduced in a forward sweep, a reversed sweep and a third pair, with no hover benefit
+  either (45 → 50 ms). **Reverted 12 Sep 2026.** The numbers the scrim session published as
+  its "after" turned out to describe the build without the scrim.
+  - **So `git checkout <commit>` is the ablation, not a CSS override.** An override can only
+    neutralise declarations; it cannot remove an element, its layer, or the selector matching
+    it. When the change under test adds or removes DOM, measure the two commits — build and
+    all — alternating conditions and sweeping in both directions.
+  - The per-node dimming rule is back, and so is `--erd-dim-opacity + 0.15` on untraced
+    connectors, which exists so thin lines survive dimming.
+  - **What the original diagnosis got right still stands**: the cold click's cost is the
+    style and paint the hover left pending, flushed inside the press's own handler. It is
+    just that one composited layer over the viewport is not cheaper than 111 repaints here.
 - **A change that its own test cannot distinguish from its opposite is not a fix.** The
   deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
   assertion still passed with the scheduler's behaviour inverted, which is what exposed it.

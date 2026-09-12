@@ -46,19 +46,21 @@ const INTERACTION_BUDGET_MS = 100
  * ONE GESTURE IS EXEMPT FROM NFR-1.3, BY DECISION RATHER THAN BY OVERSIGHT. On the
  * production build at 120 entities with Detail pinned to All fields, a COLD click — move
  * onto a box and press with no dwell, which is what this file samples and what a person
- * does — runs a median of 105-119 ms against 36 ms for the same click with the pointer
- * already at rest. On 12 Sep 2026 the requirement was narrowed to the detail level the tool
- * selects for itself, where every gesture is inside budget, and this one was exempted with
- * its figure recorded. See the NFR-1.3 row in docs/SRS.md.
+ * does — runs a median of 108 ms against 36 ms for the same click with the pointer already
+ * at rest. On 12 Sep 2026 the requirement was narrowed to the detail level the tool selects
+ * for itself, where every gesture is inside budget, and this one was exempted with its
+ * figure recorded. See the NFR-1.3 row in docs/SRS.md.
  *
  * IT IS NOT THE TWO RENDERING BACK TO BACK. That explanation stood here until 11 Sep 2026
  * and is wrong: the press does an identical 4 `EntityNode` / 32 `AttributeRow` renders in
  * both conditions. What it pays for is the style and paint the hover left pending, flushed
  * synchronously inside the press's own handler. Four mechanisms were proposed and three are
  * measured no-ops — the running CSS transitions, both `:has()` rules, and the frame
- * pipeline. The fourth, the hover repainting 111 dimmed boxes, was fixed with one composited
- * scrim (195 → 105-119 ms, blocked 172 → ~96 ms). What is left is not a hot spot: removing
- * dimming ENTIRELY still costs 106-113 ms.
+ * pipeline. The fourth, the hover repainting 111 dimmed boxes, is real, and the one thing
+ * tried against it — a single composited scrim over the viewport — turned out to COST 50 ms
+ * rather than save any, and was reverted on 12 Sep 2026 (105 ms without it, 156 ms with,
+ * measured commit against commit in both sweep directions). What is left is not a hot spot:
+ * removing dimming ENTIRELY still costs 106-113 ms.
  *
  * So the assertion cannot be the budget without leaving a permanently red command, and it
  * must not be a snug fit around today's figure either: a tripwire that flakes gets muted.
@@ -84,15 +86,19 @@ const INTERACTION_REGRESSION_CEILING_MS = 250
  *
  * NFR-1.3's exemption rests on a claim about MECHANISM: the cold press costs what it costs
  * because of style and paint the hover left pending, and that residue is already at the
- * floor — removing dimming entirely only takes it from ~96 ms of blocked main thread to
- * ~93. A change that pushed real work back into that press would show up here long before
- * it showed up in the latency median, which on this machine drifts 14 ms between runs of
- * the same condition and could not resolve it.
+ * floor — removing dimming entirely barely moves it. A change that pushed real work back
+ * into that press would show up here long before it showed up in the latency median, which
+ * on this machine drifts ~10 ms between runs of the same condition and could not resolve it.
+ *
+ * It has already earned its place once. The composited scrim reverted on 12 Sep 2026 took
+ * this figure from 97 ms to 153 ms while the session that built it reported an improvement,
+ * because that session reproduced its "before" with a CSS override inside its own build
+ * instead of checking out the previous commit.
  *
  * `longtask` is the right instrument for the same reason it is in NFR-1.4: it reports a
  * single uninterrupted block rather than elapsed time, which is what "the press is doing
- * synchronous work" actually means. Measured at 84-102 ms over four interleaved runs after
- * the scrim, against 172 before it and no entry at all for a warm press.
+ * synchronous work" actually means. Measured at a median 97 ms, against no entry at all for
+ * a warm press.
  *
  * A tripwire at roughly 2.5x the measurement, the same ratio as APPLY_BLOCK_CEILING_MS and
  * for the same reason — this must not fail because the laptop was busy.
@@ -590,7 +596,7 @@ for (const detail of DETAIL_STATES) {
        * 25 is then an extreme-value statistic that tracks background load rather than the
        * code — one busy sample moves it by 100 ms — which is exactly what the latency
        * assertions in this file already refuse to do. The median is also what the figure on
-       * record is (84-102 ms over four interleaved runs), so this compares like with like.
+       * record is (a median 97 ms), so this compares like with like.
        */
       const blockMedian = selectBlocks.length === 0 ? 0 : median(selectBlocks)
       const blockWorst = selectBlocks.length === 0 ? 0 : Math.max(...selectBlocks)
@@ -632,7 +638,7 @@ for (const detail of DETAIL_STATES) {
         .soft(
           blockMedian,
           `the cold press at "${detail.name}" now blocks the main thread for far longer ` +
-            'than anything on record (84-102ms after the scrim, 172ms before it). ' +
+            'than anything on record (a median 97ms). ' +
             "NFR-1.3's exemption for this gesture assumes the residue is browser style " +
             'and paint with no React work left in it — a block this size means something ' +
             'has been put back into the press, and the SRS row needs revisiting rather ' +

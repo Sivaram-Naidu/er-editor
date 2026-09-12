@@ -257,7 +257,7 @@ describe('hovering and selecting do not redraw the other boxes (NFR-1.3)', () =>
    *
    * A cold click is the pointer arriving on a box and pressing with no dwell, so the press
    * renders while the hover it just started is still in flight. At 120 entities with Detail
-   * pinned to All fields it costs 105-119 ms against a 100 ms budget, and on 12 Sep 2026
+   * pinned to All fields it costs a median 108 ms against a 100 ms budget, and on 12 Sep 2026
    * that gesture was exempted from NFR-1.3 rather than chased — see the SRS row.
    *
    * The whole exemption rests on ONE measured claim: the extra cost is not React. Counted

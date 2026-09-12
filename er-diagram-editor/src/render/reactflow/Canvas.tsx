@@ -7,7 +7,6 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
-  ViewportPortal,
   type Connection,
   type Edge,
   type Node,
@@ -336,15 +335,6 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
           type: 'relationship',
           source: from.entityId,
           target: to.entityId,
-          /*
-           * Only a TRACED connector is lifted over the scrim (see the note on
-           * `ViewportPortal` below). Lifting the whole `.react-flow__edges` layer instead
-           * was tried and looked wrong: every connector then drew ON TOP of every untraced
-           * box, so the diagram filled with lines crossing through tables. Untraced edges
-           * stay under the scrim and are dimmed by it, which costs them the slightly
-           * lighter dim they used to get and is worth it for keeping edges behind boxes.
-           */
-          ...(traced.relationships.has(relationship.id) ? { zIndex: 2 } : {}),
           data: {
             relationship,
             sourceName: entityById.get(from.entityId)?.name ?? '',
@@ -493,31 +483,6 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
          * a missing end. React Flow already prevents those, so nothing is rejected here. */
         deleteKeyCode={null}
       >
-        {/*
-          * DIMMING, DONE ONCE INSTEAD OF ONCE PER BOX (NFR-1.3).
-          *
-          * `.erd-canvas[data-tracing] .erd-node:not([data-traced])` used to set an opacity
-          * on every untraced box, which at 120 entities and L2 repaints 111 boxes and
-          * ~1,900 attribute rows. Measured on the production build: a cold click blocked
-          * the main thread for 159 ms, of which 148 ms was paint — and neutralising the
-          * dimming rule alone took the whole gesture from 191 ms to 117 ms. One overlay
-          * costs a composite instead, and lands at 118 ms, i.e. on the ceiling that
-          * removing the dimming outright defines.
-          *
-          * It has to be INSIDE the viewport, and that is what `ViewportPortal` is for.
-          * `.react-flow__viewport` carries a transform, so it is the only stacking context
-          * here; `.react-flow__edges` and `.react-flow__nodes` are both `z-index: auto` and
-          * create none, so every edge and every node wrapper competes directly in it. That
-          * is what lets one element sit between untraced boxes (z 0) and traced ones (z 5).
-          *
-          * Mounted always rather than only while tracing: a mount per hover is a commit per
-          * hover, which is the cost this is removing. `data-tracing` drives its opacity, so
-          * it is invisible at rest and never renders on the export surface, which passes no
-          * hover state at all.
-          */}
-        <ViewportPortal>
-          <div className="erd-scrim" />
-        </ViewportPortal>
         <SurfaceObserver onResize={props.onPaneResize} onNodesMeasured={props.onNodesMeasured} />
         <RevealController request={props.revealRequest} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--erd-grid)" />
