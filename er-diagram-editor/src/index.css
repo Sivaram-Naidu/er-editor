@@ -5,6 +5,7 @@
 @import './render/reactflow/canvas.css';
 @import './features/inspector/inspector.css';
 @import './features/validation-panel/validation-panel.css';
+@import './features/search/search.css';
 
 html,
 body,

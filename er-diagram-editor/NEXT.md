@@ -205,6 +205,19 @@ viewport even when invisible, and a first attempt measured the "before" 46 ms to
 | It is still outside NFR-1.3             | 105-119 ms against a 100 ms budget. Narrowed, not met. See item 1.                                                                                                                                    |
 | The gate                                | `pnpm verify` green, 16 e2e specs, including the hover spec rewritten onto the new mechanism.                                                                                                          |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — Ctrl+K palette session)
+
+| Thing                                | Evidence                                                                                                                                                                                                                       |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Ctrl+K opens it, caret already inside | `ui/Dialog` focuses the PANEL by design, so a palette dropped into it would swallow the first keystroke. It grew an `initialFocus` prop; the spec asserts `toBeFocused()` on the input itself, which only a real focus trap can answer. |
+| …including mid-rename                 | `InlineName` called `stopPropagation()` on every keydown, so the chord never reached the window keymap. It now lets modifier chords through — `e`/`Delete` are still stopped, and Ctrl+Z is still turned away by the keymap's own typing guard. Found by the spec, not by review. |
+| Picking a table selects AND moves the camera | Pan away first, then Ctrl+K → "product" → Enter: one id selected, `PRODUCT` carries `.selected`, and `.react-flow__viewport`'s transform is not what it was. Asserting selection alone would pass on a broken camera. |
+| A field result names its table        | Ctrl+K → "email" → the first row reads `email_address` AND `CUSTOMER`. FR-2.6 asks for this in words, so it is asserted in words.                                                                                              |
+| Escape closes it and changes nothing  | Node count identical either side. The keymap is disabled while a dialog is open — the export dialog once let `e` add an entity from underneath it.                                                                             |
+| It runs commands, not just searches   | Ctrl+K → "add entity" → Enter adds a box. FR-9.2's half, end to end.                                                                                                                                                          |
+| The matcher is not a library          | 1,230 records at 120 entities, ~3,000 at NFR-2.2's ceiling; 0.8 ms and 2.0 ms per query against NFR-1.7's 50 ms. `fuse.js` + `cmdk` would have been 13,488 B gzip for speed nobody needs.                                       |
+| The listbox is a listbox              | A `<select>` has an implicit `combobox` role, so `getByRole('combobox')` matched the toolbar's Detail and Theme controls too and resolved to three elements. Every palette locator is by accessible name now. |
+
 ### Known broken
 
 1. **NFR-1.3 is still missed, narrowly, when a click follows the pointer onto a box and
@@ -273,9 +286,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 720 unit tests in 31 files, ~58s. Coverage 92.2% statements / 83.7% branches / 93.6%
-  lines against an 80% gate.
-- **16 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
+- 764 unit tests in 34 files, ~60s. Coverage 92.3% statements / 84.1% branches / 93.7%
+  lines against an 80% gate. `features/search` 90.7% / 91.8%.
+- **22 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -480,14 +493,6 @@ So three of the four plausible stories about this gesture are now dead, and the 
 the dimming repaint. That is where the next attempt goes.
 
 
-### 2. Search and command palette (FR-2.6, FR-9.2)
-
-Promoted out of Tier 3, because the reason it sat there is gone: 100-table diagrams are now
-reachable in one click, so "find CUSTOMER" is the next thing standing between the tool and
-being usable at that size. Note `fuse.js` and `cmdk` were removed on 10 Sep 2026 after
-sitting unused through six stages; re-add them when this starts, or decide that a substring
-match over a hundred table names does not need a fuzzy-search library.
-
 ## Tier 2 — make it actually useful
 
 ### 3. Re-import onto an existing diagram, preserving layout
@@ -541,6 +546,16 @@ In order:
   that to `useAutoLayout.ts` on 11 Sep 2026, dropping 25 lines including the whole
   `UseAutoLayoutRequest` fix. Run git from `Er_tool/`, or use `git -C`. The inner `.git`
   wants deleting, but that is not a change to make in passing.
+
+- **`useGoToIssue` is misnamed, and `features/search` now imports it from
+  `features/validation-panel`.** It is not issue-specific in anything but its name — it
+  switches on an `IssueTarget`, which is the same three kinds the search index emits, and it
+  owns two things worth not duplicating: that `selectAttribute` must come AFTER
+  `selectEntities` (which clears it), and that a relationship is framed by both its ends.
+  Copying twenty lines rather than importing them is how `connect.test.ts` rotted, so the
+  import stands — but the hook wants renaming to `useGoToTarget` and moving somewhere
+  neither feature owns. Left alone deliberately so a feature commit did not also refactor a
+  different feature.
 
 - **The three `.erd.json` fixtures are empty and invalid, and want deleting or
   populating.** `tests/fixtures/README.md` described `reference.erd.json` as 120 entities

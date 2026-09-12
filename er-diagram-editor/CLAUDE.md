@@ -396,6 +396,24 @@ culling off.
     capture loses its CSS and falls back to `fill: black`. `inlineSvgPresentation` in
     `io/formats/image/export.ts` copies it across by hand.
 
+- **A `<select>` is a `combobox` to the accessibility tree, so `getByRole('combobox')` is
+  not specific.** The Ctrl+K palette's input, the toolbar's Detail select and its Theme
+  select all answer to it — the first version of the palette's e2e specs resolved to three
+  elements and failed on strict mode. Worse, some of them PASSED first: Radix marks the rest
+  of the page `aria-hidden` once the dialog is open, so whether the other two are in the tree
+  depends on how far the open animation has got. Always give the role a name.
+- **`stopPropagation()` on an input's keydown makes every global chord unreachable from that
+  input.** `InlineName` did it to stop `e` and `Delete` reaching the canvas keymap mid-word,
+  which is right — but it also meant Ctrl+K could not open the palette from the one field a
+  user is most likely to be in. It now stops bare keys only and lets chords through; the
+  keymap's own typing guard still turns away Ctrl+Z, so undo inside a text field stays the
+  browser's. Deciding a key is "not for the document" at the input and deciding it is "not
+  for the keymap" at the window are two different decisions, and doing both in one place
+  gets one of them wrong.
+- **jsdom does not implement `scrollIntoView` at all.** Not a stub that no-ops — the method
+  is absent, so an unguarded call throws inside the passive effect and takes the component
+  down with it. It is layout, and jsdom performs none. Feature-detect it.
+
 ## Testing conventions
 
 - **The suite default is `node`.** Files that mount components opt back UP with
