@@ -1,6 +1,6 @@
 # What to work on next
 
-**Working queue. Updated 10 September 2026.**
+**Working queue. Updated 12 September 2026.**
 
 This file exists so a session starting cold — after `/clear`, or a week later, or someone
 else entirely — knows where the project actually stands and what to pick up, without
@@ -218,21 +218,45 @@ viewport even when invisible, and a first attempt measured the "before" 46 ms to
 | The matcher is not a library          | 1,230 records at 120 entities, ~3,000 at NFR-2.2's ceiling; 0.8 ms and 2.0 ms per query against NFR-1.7's 50 ms. `fuse.js` + `cmdk` would have been 13,488 B gzip for speed nobody needs.                                       |
 | The listbox is a listbox              | A `<select>` has an implicit `combobox` role, so `getByRole('combobox')` matched the toolbar's Detail and Theme controls too and resolved to three elements. Every palette locator is by accessible name now. |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — NFR-1.3 narrowing session)
+
+The decision session for Tier 1 item 1, not a fix session: no `src/` change was made. What
+was built is the guard the decision was conditional on, and **the guard immediately
+contradicted the number the decision had been argued from** — which is the most useful thing
+it could have done on its first run. Production build, 120 entities, 25 samples per gesture,
+`pnpm test:perf:browser`, two full runs.
+
+| Thing                                                | Evidence                                                                                                                                                                                                                                                              |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The render-count guard fails when the mechanism does | Mutated `Canvas.tsx` twice and re-ran. Un-memoising `tracedAttributesByEntity` kills it (React render loop); keying that memo on the selection as well trips the assertion itself — **2 boxes redrawn against 1**. The other six tests in the file pass under both mutants, so this one is what catches it. `Canvas.tsx` restored byte-identical (`git diff` empty). |
+| It would pass with a weaker fixture                  | `schema()` has no foreign keys, so `tracedAttributesByEntity` stays empty mid-hover and the mutants survive. The test builds its own FK through `setForeignKey` for that reason — checked, not assumed.                                                                |
+| Follow zoom is AT the budget, not clear of it        | Selection p95 **104 ms then 89 ms** over two runs (median 75 both times); hover p95 53 / 56; keystrokes 11–12. One run of two misses the 100 ms budget the narrowing relies on.                                                                                        |
+| **The cold click re-measures 50 ms worse than the record** | All fields, selection median **165 / 171 ms** and main-thread block median **153 ms**, against the scrim session's 105–119 ms and 84–102 ms blocked earlier the same day. Two runs, consistent. The median drifts ~10 ms here, so this is outside noise. **Unexplained — new Tier 1 item 1.** |
+| The block figure is a median, deliberately           | First cut reported the worst of 25 samples and read 199 ms, which is an extreme-value statistic tracking background load. CLAUDE.md's "summarise with the WORST" rule is for the layout apply — once per run, sitting on `longtask`'s 50 ms floor — and does not transfer to 25 samples all well clear of it. |
+| The gate                                             | `pnpm verify` green: 765 unit tests in 34 files, 22 e2e specs, typecheck and lint clean.                                                                                                                                                                               |
+
 ### Known broken
 
-1. **NFR-1.3 is still missed, narrowly, when a click follows the pointer onto a box and
-   Detail is pinned to All fields.** **105-119 ms against a 100 ms budget**, down from ~195
-   after the scrim landed on 12 Sep 2026; blocked main thread ~96 ms, down from ~170. The
-   cause is known and the one fix worth making is in: not React (the press does an identical
-   4 `EntityNode` / 32 `AttributeRow` renders either way), but the paint the hover left
-   pending. What is left is not a hot spot — removing dimming ENTIRELY still costs 106-113 ms
-   — so Tier 1 item 1 is now a decision about the requirement rather than a bug. At the
-   detail level the tool actually uses at 120 tables (Follow zoom, so L0) everything is
-   inside budget, and a click with the pointer already resting on the box is 36 ms.
+1. **The cold click now measures ~50 ms worse than it did earlier the same day, and nobody
+   knows why.** Selection median **165-171 ms** and blocked main thread median **153 ms** at
+   All fields, against the **105-119 ms / 84-102 ms** the scrim session recorded on 12 Sep
+   2026 — two runs each, consistent. The median on this machine drifts about 10 ms, so this
+   is outside the noise floor that item 3 warns about. Found by the guard built for the
+   NFR-1.3 narrowing, on its first run. **This is Tier 1 item 1 and is a real open question,
+   not a decision.**
+2. **NFR-1.3's own budget is now AT the line at Follow zoom, where it used to be clear.**
+   Selection p95 **104 ms then 89 ms** over two runs, against 49-57 on 11 Sep. The narrowed
+   clause relies on Follow zoom being inside budget, so this is the same question as item 1
+   seen from the other side, and probably has the same answer.
    **NFR-1.4's clause is not on this list**: it was narrowed on 11 Sep 2026 to exclude the
    single task that applies a layout, which is what it was always protecting against
-   interference with. See the SRS row.
-2. **Interaction timings on this machine have a noise floor of roughly 100 ms, which is
+   interference with. See the SRS row. **NFR-1.3's clause was narrowed the same way on
+   12 Sep 2026** — the budget is worded at the detail level the tool selects for itself, and
+   the cold click at pinned All fields is exempted with its figure recorded. That decision
+   stands on the mechanism (three of four proposed causes are measured no-ops, and the
+   fourth is fixed), which items 1 and 2 do not touch; what they touch is whether the
+   figures under it are still true.
+3. **Interaction timings on this machine have a noise floor of roughly 100 ms, which is
    bigger than most changes worth making.** Five passes with no code change put hover's p95
    anywhere between 56 and 170 ms while its median moved by 10 ms — so read the medians,
    and `perf.spec.ts` asserts on them for that reason. But medians are not safe either
@@ -241,14 +265,14 @@ viewport even when invisible, and a first attempt measured the "before" 46 ms to
    (Tier 1 item 1 has the numbers). **Use time to size a problem, never to choose between
    two fixes.** For that, assert a mechanism — render counts, commits per gesture, whether
    a worker was created — the way `redraw.test.tsx` and the auto-layout spec do.
-3. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
+4. **No re-sync.** Importing a schema opens a NEW document and re-runs auto-layout, so any
    arrangement work is lost. A product gap rather than a bug — see Tier 2. Now the most
    visible thing on this list, because the layout it throws away is finally a real one.
-4. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
+5. **The inspector is drawn over the canvas, not beside it.** Selecting anything hides the
    right-hand part of the diagram, including whole tables, and they stop being clickable.
    See "Housekeeping".
-5. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
-   overlay minimap, but combined with 3 a good deal of the canvas is unreachable. See
+6. **The minimap swallows pointer events in the bottom-right corner.** Inherent to an
+   overlay minimap, but combined with 4 a good deal of the canvas is unreachable. See
    "Housekeeping".
 
 Fixed and verified in a browser on 10–11 Sep 2026 — do not re-open these without new
@@ -286,9 +310,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 764 unit tests in 34 files, ~60s. Coverage 92.3% statements / 84.1% branches / 93.7%
+- 765 unit tests in 34 files, ~46s. Coverage 92.3% statements / 84.1% branches / 93.7%
   lines against an 80% gate. `features/search` 90.7% / 91.8%.
-- **22 e2e specs in 3 files, ~47s, all passing.** No `test.fail()` markers left. `pnpm
+- **22 e2e specs in 3 files, ~53s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -399,98 +423,85 @@ about, and a graph shape it was indifferent to — are fixed, with browser evide
 
 What is left in this tier is the third question, which the first two were hiding: the tool
 lays out 120 tables in under a second, but is it RESPONSIVE while you use them? That had
-never been measured outside jsdom. It has now, and the answer is item 1.
+never been measured outside jsdom. It has now — and the question has moved on twice. The
+mechanism was settled by ablation, the requirement was narrowed on 12 Sep 2026 to what it
+protects, and then the guard built to hold that narrowing honest reported the gesture 50 ms
+slower than the session that argued it. So item 1 is no longer "what is slow"; it is "why
+does the same gesture on the same machine no longer measure what it measured".
 
 Worth not re-deriving: 120 tables lay out in under a second in Chrome, a real dump imports
 with no overlaps at all, and the ~840 ms the perf suite reports in-process was an honest
-number. The tool is not slow to lay out. It is slow to respond, at one detail level, for one
-identified reason.
+number. The tool is not slow to lay out. It is slow to respond, at one detail level, and the
+mechanism behind that is identified, fixed as far as it goes, and exempted in the SRS with
+its figure — a figure that is now in dispute.
 
-### 1. A cold click is still outside NFR-1.3, and what is left is a decision
+### 1. The cold click measures 50 ms worse than it did hours earlier, and nobody knows why
 
-**The open question in this slot is CLOSED, and the one fix worth making has landed.**
-Measured 11 Sep, fixed 12 Sep 2026. A cold click was ~195 ms and blocked the main thread for
-~170 ms; it is now **105-119 ms**, blocking ~96 ms, against a 100 ms budget. The item stays
-open because that is still a miss — but every mechanism anyone has proposed for it has now
-been measured, three of the four were no-ops, and what is left is option 3 below.
+**This slot used to hold a decision. The decision was taken on 12 Sep 2026 — narrow NFR-1.3
+rather than chase the last few milliseconds — and it is done: the SRS row is re-worded and
+the two guards it was conditional on are in. What is here now is what those guards reported
+on their first run.**
 
-**Already established — do not redo any of this.**
+The gesture is the same one: the pointer arrives on a box with Detail pinned to All fields
+and presses with no dwell. It measured **105-119 ms, blocking 84-102 ms**, when the scrim
+landed. Hours later, same machine, same build path, it measures **165-171 ms, blocking a
+median 153 ms** — two full runs, consistent with each other. Follow zoom moved in the same
+direction: selection p95 **104 then 89 ms**, where 11 Sep recorded 49-57.
 
-- **The press does the SAME React work in both conditions: 4 `EntityNode` and 32
-  `AttributeRow` renders.** Identical in five conditions across three runs, counted inside
-  the page at the trusted `pointerdown` and again at the frame that shows `.selected`. This
-  was the comparison this item asked for, and it settles the branch: **the extra cost is not
-  React.** (The 5/40 on record was a different box; the shape of the answer is the same.)
-- **It is not the frame pipeline either.** Splitting the latency at the moment the class is
-  actually set gives `DOM→frame` of **5-7 ms in every condition**. All of the difference is
-  upstream of the DOM change: **190 ms cold against 36 ms warm.**
-- **The cold press BLOCKS for ~172 ms** — a `longtask` overlapping it — where the warm press
-  emits no entry at all. So it is synchronous work inside the press's own task, not the
-  selection waiting its turn behind an animation.
-- **The 164 running CSS transitions are a correlate, not the cause.** They are the obvious
-  suspect and they are wrong: killing every transition takes the count to 0 and leaves the
-  latency at 154 ms. *This is the second time a plausible story about this gesture has
-  survived until someone ablated it. Ablate it.*
-- **What the press is actually paying for is the style and layout the hover left pending**,
-  flushed synchronously when the press's own handler runs. Neutralising the dimming rule
-  alone takes it 195 → 119 ms; neutralising every trace declaration takes it to 111 ms and
-  still leaves a 97 ms block. The residue is the hover's DOM attribute mutations and the
-  selector re-matching they force — including the two `:has()` rules, whose **matching** cost
-  a CSS override cannot remove, so that ablation under-states its own half.
-- **`settle()` is not cheating.** The warm figure is a real measurement of a real gesture
-  (pressing a box the pointer already rests on); it is simply not the common one. Both
-  numbers are honest and they are measuring different things.
+**Why this is not simply the noise floor.** Known broken 3 is emphatic that the p95 here is
+worthless and the median is the thing to read — and the median is what moved. Five passes
+with no code change moved it by 10 ms. This is 50.
 
-**Corrected: the 172 ms gap was the wrong gesture.** The gap between the pointer landing on
-the box and the button going down, in the gesture `perf.spec.ts` actually measures, is
-**47-51 ms** — not 172. The 172 ms belongs to `coldClick`, which parks the pointer at (8, 8)
-and does a round-tripping `elementFromPoint` check before the real move: measured at 248 ms
-from its first move and 65 ms from its last. Everything that was inferred from "the 120 ms
-transition has finished before the press arrives" is therefore unsupported — at a 50 ms
-dwell the transition is a third done. It happens not to change the conclusion, because the
-transitions are not the cause either, but the premise was wrong and is corrected here and in
-CLAUDE.md.
+**Already established — do not redo any of this.** It survives the discrepancy, because all
+of it is a comparison between conditions measured in the same run rather than an absolute
+number:
 
-**The decision that needs making.** Three directions, and they are not equivalent:
+- **The press does the SAME React work cold and warm** — 4 `EntityNode` and 32
+  `AttributeRow` renders, counted inside the page in five conditions across three runs.
+- **It is not the frame pipeline.** `DOM→frame` is 5-7 ms in every condition; all of the
+  difference is upstream of the DOM change.
+- **The 164 running CSS transitions are a correlate, not the cause.** Killing every
+  transition takes the count to 0 and leaves the latency at 154 ms.
+- **The two `:has()` rules cost nothing here.** Removed and measured against the pair
+  restored as an ablation in the same interleaved run: 196 vs 200 ms, n=20 each. Reverted.
+- **The one real cause was the hover repainting 111 dimmed boxes**, and `.erd-scrim` fixed
+  it — landing at or below the ceiling that removing dimming outright defines.
 
-1. ~~**Stop the hover dirtying 111 boxes at all.**~~ **Done 12 Sep 2026.** One overlay
-   (`.erd-scrim`, rendered through React Flow's `ViewportPortal`) sits between the untraced
-   boxes and the traced ones and dims by compositing instead of by repainting 111 boxes and
-   ~1,900 rows. It reaches the ceiling that removing dimming outright defines: **~119 → ~110
-   ms, blocked ~118 → ~96 ms**, over four interleaved runs. Two things it cost, both in the
-   browser table: untraced connectors lost the slightly-lighter dim they used to get, because
-   an element behind a wash cannot show through more than the wash allows; and only TRACED
-   edges are lifted over the scrim, after lifting the whole edge layer turned the diagram
-   into a grid of lines drawn through tables.
-2. ~~**Drop the two `:has()` rules.**~~ **Tried on 11 Sep 2026 and it does nothing.** Both
-   were removed and the z-index set from React as a class on the traced wrappers instead,
-   then measured against the `:has()` pair restored as an ablation **in the same run,
-   interleaved**: **196 ms against 200 ms, and 169 ms of blocked main thread against
-   175 ms**, n=20 each. That is inside the noise floor. The change was reverted rather than
-   kept — it is a no-op that also lets a selected untraced box elevate above the traced path,
-   which is a behaviour change for nothing. `:has()` is the famous expensive selector and it
-   is not what is expensive here. **Do not redo this.**
-3. **Accept the rest and re-word NFR-1.3.** Now the only one left. The gesture is a
-   pointer arriving and pressing immediately; the budget is 100 ms; it costs **105-119 ms**
-   at L2 after the scrim, and is comfortably inside budget at the detail level 120 tables
-   actually render at. What remains is not a hot spot with a name — with dimming removed
-   ENTIRELY the same gesture still costs 106-113 ms, so the residue is the cost of a
-   selection render landing on a main thread that has just done a hover, not any one rule.
-   Buying it back means making the hover itself cheaper, which is a different item.
-   **This is now a decision to take rather than a bug to fix.**
+**Ruled out already for the discrepancy itself, cheaply and without measuring:**
 
-**Whichever is chosen, the guard is a render-count and block-duration assertion, not a
-stopwatch** — the harness for it is in the browser table above and was deleted with the
-session; rebuild it from that description rather than trusting a wall-clock number.
+- **The Ctrl+K palette is not it.** `CommandPalette` is mounted only while
+  `activeDialog === 'palette'` (`Editor.tsx`), so its 1,230-record index cannot contribute
+  to a press. It was the obvious suspect — the only feature landed between the scrim session
+  and these runs — and it is eliminated by construction rather than by a stopwatch.
+- **The new `blockCount()` round trip in `perf.spec.ts` is not it either**, by position: it
+  sits before `mouse.move`, not between the move and the press, so the gap under study is
+  untouched. If you want that measured rather than argued, delete the line and re-run.
 
-**Not worth trying.** Deferring or suppressing the hover (the reverted scheduler). Reusing
-node objects on a selection render — React Flow keeps its own `selected` and reusing breaks
-shift-click, which has an e2e spec. `startTransition` and a reference-stable `edges` array,
-both measured as no-ops. **Disabling the transitions** — measured, a no-op too.
-**Removing the `:has()` rules** — measured in-run against itself, a no-op, reverted.
+**What would actually discriminate, cheapest first:**
 
-So three of the four plausible stories about this gesture are now dead, and the survivor is
-the dimming repaint. That is where the next attempt goes.
+1. **Run it again on an idle machine**, three times, and read the medians. Both runs on
+   record were taken within minutes of a full `pnpm verify` — a production build plus 22 e2e
+   specs — so thermal and background state is the cheapest available explanation and has not
+   been excluded.
+2. **Ablate against the scrim commit.** `a49f970` is "Dim the canvas once instead of every
+   box" and `1d904d5` is the palette. Check out `a49f970`, run `pnpm test:perf:browser`, and
+   compare **within the same sitting** — never against the numbers written above. Comparing
+   today's run to a number recorded on another day is exactly the mistake Known broken 3
+   exists to prevent, and it is the mistake this item is currently making.
+3. Only if 1 and 2 both come back clean is a third story worth inventing.
+
+**Do not re-open the narrowing on the strength of this.** That decision rests on the
+mechanism — three of four proposed causes measured as no-ops, the fourth fixed — and on
+Follow zoom being the detail level the tool actually renders 120 tables at. Whether this one
+gesture costs 119 ms or 171 ms changes neither. What it changes is whether the figures
+printed in the SRS row are still true, and they are marked there as disputed until this is
+answered.
+
+**The guard to trust while answering it is not the clock.** `tests/unit/render/redraw.test.tsx`
+asserts that a press landing during a hover redraws no more boxes than one that does not —
+verified by mutation, twice — and `perf.spec.ts` asserts the press's main-thread block
+median. If React work had returned to this gesture, the first would already be red. It is
+not, which is itself a clue about where the 50 ms is not.
 
 
 ## Tier 2 — make it actually useful

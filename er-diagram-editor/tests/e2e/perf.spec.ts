@@ -43,18 +43,22 @@ const INTERACTION_BUDGET_MS = 100
 /**
  * The regression guard, and deliberately nowhere near the budget above.
  *
- * ONE GESTURE STILL MISSES NFR-1.3. On the production build at 120 entities with Detail
- * pinned to All fields, a COLD click — move onto a box and press with no dwell, which is
- * what this file samples and what a person does — runs a median of 99-195 ms, against 41 ms
- * for the same click with the pointer already at rest.
+ * ONE GESTURE IS EXEMPT FROM NFR-1.3, BY DECISION RATHER THAN BY OVERSIGHT. On the
+ * production build at 120 entities with Detail pinned to All fields, a COLD click — move
+ * onto a box and press with no dwell, which is what this file samples and what a person
+ * does — runs a median of 105-119 ms against 36 ms for the same click with the pointer
+ * already at rest. On 12 Sep 2026 the requirement was narrowed to the detail level the tool
+ * selects for itself, where every gesture is inside budget, and this one was exempted with
+ * its figure recorded. See the NFR-1.3 row in docs/SRS.md.
  *
  * IT IS NOT THE TWO RENDERING BACK TO BACK. That explanation stood here until 11 Sep 2026
  * and is wrong: the press does an identical 4 `EntityNode` / 32 `AttributeRow` renders in
- * both conditions. What it pays for is the style and layout the hover left pending, flushed
- * synchronously inside the press's own handler — 172 ms of blocked main thread cold, and no
- * `longtask` entry at all warm. The CSS transitions still running when it lands are a
- * correlate: ablating them changes nothing. NEXT.md Tier 1 item 1 carries the measurements
- * and the decision that needs making.
+ * both conditions. What it pays for is the style and paint the hover left pending, flushed
+ * synchronously inside the press's own handler. Four mechanisms were proposed and three are
+ * measured no-ops — the running CSS transitions, both `:has()` rules, and the frame
+ * pipeline. The fourth, the hover repainting 111 dimmed boxes, was fixed with one composited
+ * scrim (195 → 105-119 ms, blocked 172 → ~96 ms). What is left is not a hot spot: removing
+ * dimming ENTIRELY still costs 106-113 ms.
  *
  * So the assertion cannot be the budget without leaving a permanently red command, and it
  * must not be a snug fit around today's figure either: a tripwire that flakes gets muted.
@@ -66,9 +70,34 @@ const INTERACTION_BUDGET_MS = 100
  * code change in between put hover's p95 anywhere between 56 and 170 ms while its median
  * moved by 10 ms — the tail on this machine is background load, not the app. The p95 is
  * what the requirement is worded against, so it is what gets printed; the median is what
- * can carry an assertion. Lower this to 100 and delete the note when item 1 lands.
+ * can carry an assertion.
+ *
+ * DO NOT lower this to 100 for the exempt gesture. The narrowing is recorded in the SRS
+ * with its numbers; the thing that keeps it honest is not a tighter stopwatch here but the
+ * two mechanism assertions — `COLD_PRESS_BLOCK_CEILING_MS` below, and the render-count pair
+ * in `tests/unit/render/redraw.test.tsx`.
  */
 const INTERACTION_REGRESSION_CEILING_MS = 250
+
+/**
+ * The half of the cold-click guard that a stopwatch cannot provide.
+ *
+ * NFR-1.3's exemption rests on a claim about MECHANISM: the cold press costs what it costs
+ * because of style and paint the hover left pending, and that residue is already at the
+ * floor — removing dimming entirely only takes it from ~96 ms of blocked main thread to
+ * ~93. A change that pushed real work back into that press would show up here long before
+ * it showed up in the latency median, which on this machine drifts 14 ms between runs of
+ * the same condition and could not resolve it.
+ *
+ * `longtask` is the right instrument for the same reason it is in NFR-1.4: it reports a
+ * single uninterrupted block rather than elapsed time, which is what "the press is doing
+ * synchronous work" actually means. Measured at 84-102 ms over four interleaved runs after
+ * the scrim, against 172 before it and no entry at all for a warm press.
+ *
+ * A tripwire at roughly 2.5x the measurement, the same ratio as APPLY_BLOCK_CEILING_MS and
+ * for the same reason — this must not fail because the laptop was busy.
+ */
+const COLD_PRESS_BLOCK_CEILING_MS = 250
 
 /**
  * NFR-1.4's budget as the clause is now worded: interaction must not block for more than
@@ -440,8 +469,13 @@ for (const detail of DETAIL_STATES) {
         }
       }
 
+      // The cold press is the gesture NFR-1.3 exempts, so it is also the one that has to
+      // be watched by something other than a clock — see COLD_PRESS_BLOCK_CEILING_MS.
+      await armLongTaskObserver(page)
+
       const hover: number[] = []
       const select: number[] = []
+      const selectBlocks: number[] = []
       const keystroke: number[] = []
 
       // HOVER. Straight from one box to the next, which is what a person reading a diagram
@@ -462,11 +496,20 @@ for (const detail of DETAIL_STATES) {
         if (select.length >= 25) break
         await settle(page)
         await armLatencyProbe(page, 'pointerdown', target.id, 'selected')
+
+        // Everything the observer has already reported belongs to earlier samples; the
+        // `settle` above is what makes that true. Read AFTER `readLatency`, which waits
+        // frames — a `longtask` entry is delivered on a later task than the one it
+        // describes, so reading it any sooner would find nothing.
+        const reportedBefore = await blockCount(page)
         await page.mouse.move(target.x, target.y)
         await page.mouse.down()
         await page.mouse.up()
         const measured = await readLatency(page)
-        if (measured !== undefined) select.push(measured)
+        if (measured !== undefined) {
+          select.push(measured)
+          selectBlocks.push(await worstBlockSince(page, reportedBefore))
+        }
       }
 
       // INLINE EDIT KEYSTROKES. `InlineName`'s input is controlled, so the character is on
@@ -517,13 +560,46 @@ for (const detail of DETAIL_STATES) {
       for (const [name, samples] of measurements) {
         expect(samples.length, `no ${name} latency samples were captured`).toBeGreaterThan(9)
         const p95 = percentile95(samples)
+
+        // A miss at "follow zoom" is a real miss of the requirement as it is now worded.
+        // A selection miss at "all fields" is the cold press, which the SRS exempts by name
+        // and with its figure — so it is labelled as such rather than as a failure. Nothing
+        // else at either detail level is covered by that exemption.
+        let flag = ''
+        if (p95 >= INTERACTION_BUDGET_MS) {
+          flag =
+            detail.value === '2' && name === 'selection'
+              ? '  ← the cold-press exemption, recorded in SRS NFR-1.3'
+              : '  ← MISSES NFR-1.3'
+        }
+
         console.log(
           `NFR-1.3 ${name} (${detail.name}): p95 ${p95.toFixed(0)}ms, ` +
             `median ${median(samples).toFixed(0)}ms, worst ${Math.max(...samples).toFixed(0)}ms, ` +
-            `n=${String(samples.length)}` +
-            (p95 < INTERACTION_BUDGET_MS ? '' : '  ← MISSES NFR-1.3'),
+            `n=${String(samples.length)}${flag}`,
         )
       }
+
+      /*
+       * The MEDIAN block, with the worst printed beside it — and the choice matters.
+       *
+       * CLAUDE.md's rule for `longtask` ("summarise with the WORST") is about the layout
+       * apply, which happens ONCE per run and sits right on the 50 ms detection floor, so a
+       * median over three runs is a median over a threshold. This is the opposite case: 25
+       * samples of a repeated gesture, every one of them well clear of the floor. The max of
+       * 25 is then an extreme-value statistic that tracks background load rather than the
+       * code — one busy sample moves it by 100 ms — which is exactly what the latency
+       * assertions in this file already refuse to do. The median is also what the figure on
+       * record is (84-102 ms over four interleaved runs), so this compares like with like.
+       */
+      const blockMedian = selectBlocks.length === 0 ? 0 : median(selectBlocks)
+      const blockWorst = selectBlocks.length === 0 ? 0 : Math.max(...selectBlocks)
+      console.log(
+        `NFR-1.3 cold press, main-thread block (${detail.name}): ` +
+          `median ${blockMedian.toFixed(0)}ms, worst ${blockWorst.toFixed(0)}ms, ` +
+          `n=${String(selectBlocks.length)}. ` +
+          '`longtask` has a 50ms floor, so 0 means nothing blocked at all.',
+      )
 
       /*
        * Assertions come after ALL the logging, deliberately, and softly.
@@ -542,6 +618,27 @@ for (const detail of DETAIL_STATES) {
           )
           .toBeLessThan(INTERACTION_REGRESSION_CEILING_MS)
       }
+
+      /*
+       * And the mechanism assertion the exemption actually rests on.
+       *
+       * The latency ceiling above is an order-of-magnitude tripwire; this one says
+       * something specific. The cold press is permitted to cost what it costs BECAUSE what
+       * it costs is style and paint the hover left pending, already at its floor. If work
+       * returns to that press the block grows, and it grows well before the median moves
+       * far enough to be distinguishable from this machine's own 14 ms drift.
+       */
+      expect
+        .soft(
+          blockMedian,
+          `the cold press at "${detail.name}" now blocks the main thread for far longer ` +
+            'than anything on record (84-102ms after the scrim, 172ms before it). ' +
+            "NFR-1.3's exemption for this gesture assumes the residue is browser style " +
+            'and paint with no React work left in it — a block this size means something ' +
+            'has been put back into the press, and the SRS row needs revisiting rather ' +
+            'than this ceiling.',
+        )
+        .toBeLessThan(COLD_PRESS_BLOCK_CEILING_MS)
     })
   })
 }

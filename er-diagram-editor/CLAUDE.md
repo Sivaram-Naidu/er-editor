@@ -319,7 +319,10 @@ culling off.
 - **A change that its own test cannot distinguish from its opposite is not a fix.** The
   deferred-hover scheduler above passed eight unit tests and an e2e assertion — and the e2e
   assertion still passed with the scheduler's behaviour inverted, which is what exposed it.
-  Mutate the code and re-run the guard before believing it.
+  Mutate the code and re-run the guard before believing it. **The FIXTURE hides a mechanism
+  as easily as the assertion does**: the cold-click render-count guard in `redraw.test.tsx`
+  passed with `tracedAttributesByEntity` deleted, because the three-box schema it started
+  from has no foreign keys and that map stays empty without one. It builds its own FK now.
 - **An A/B run measured as one block per condition measures the run order, not the code.**
   Five CSS conditions swept forward made dimming look 70 ms expensive; the same sweep
   reversed put every condition within 30 ms of the others, and interleaving them one sample
@@ -369,6 +372,12 @@ culling off.
   It also means readings near the threshold are bimodal — the same build, minutes apart,
   gives `[0, 51, 0]` then `[57, 0, 0]`. Summarise with the WORST of several runs; a median
   over values clustered on a detection threshold is noise.
+  - **That rule does not transfer to a repeated gesture, and assuming it does inflates the
+    number.** It is about the layout apply: ONE event per run, sitting on the 50 ms floor.
+    The cold-press guard takes 25 samples all well clear of the floor, where the max is an
+    extreme-value statistic that tracks background load — its first cut read 199 ms worst
+    against a 153 ms median, and would have been calibrated against the wrong figure. Match
+    the summary to the shape of the sample, not to the instrument.
 - **A latency probe that asks "has anything changed" measures the previous sample.** The
   first version of `perf.spec.ts` asked whether ANY node was traced or selected, so each
   sample had to clear the last one first — and the cheap way to do that, parking the pointer

@@ -23,6 +23,7 @@ import {
   createDiagram,
   createEntity,
   createRelationship,
+  setForeignKey,
   type Diagram,
   type EntityId,
   type Point,
@@ -250,4 +251,97 @@ describe('hovering and selecting do not redraw the other boxes (NFR-1.3)', () =>
     expect(verdicts.filter((verdict) => !verdict).length).toBeLessThanOrEqual(1)
   })
 
+  /**
+   * THE COLD CLICK, AS A MECHANISM RATHER THAN A STOPWATCH — the guard NFR-1.3's narrowing
+   * rests on.
+   *
+   * A cold click is the pointer arriving on a box and pressing with no dwell, so the press
+   * renders while the hover it just started is still in flight. At 120 entities with Detail
+   * pinned to All fields it costs 105-119 ms against a 100 ms budget, and on 12 Sep 2026
+   * that gesture was exempted from NFR-1.3 rather than chased — see the SRS row.
+   *
+   * The whole exemption rests on ONE measured claim: the extra cost is not React. Counted
+   * in Chrome, the press does an identical **4 `EntityNode` / 32 `AttributeRow` renders**
+   * cold and warm, so what it pays for is the style and paint the hover left pending, and
+   * that has no React-side fix left in it. If a change ever makes the press redraw MORE
+   * boxes when a hover is active, the premise is gone and the exemption is unearned — and
+   * nothing would say so, because the diagram renders identically either way and the
+   * latency difference would be far inside this machine's 14 ms run-to-run spread.
+   *
+   * So this is the assertion the requirement leans on, and it is deliberately a COUNT.
+   * A wall-clock version could not distinguish the regression from background load.
+   *
+   * It is the same pair-shaped defect as the two above: `traceSets` and
+   * `tracedAttributesByEntity` are memoised apart from the selection, so a selection render
+   * during a hover hands every untraced box the SAME shared empty set it already had. Break
+   * that memo — key it on `diagram` rather than `diagram.entities`, or go back to one Set
+   * for the whole diagram — and every box redraws on a press that happens to follow a hover.
+   */
+  function boxesRedrawnBySelecting(
+    diagram: Diagram,
+    target: EntityId,
+    state: CanvasState,
+  ): { redrawn: number; asked: number } {
+    const { rerender, unmount } = render(canvas(diagram, state))
+
+    verdicts.length = 0
+    rerender(canvas(diagram, { ...state, selectedEntityIds: new Set([target]) }))
+    const redrawn = verdicts.filter((verdict) => !verdict).length
+    const asked = verdicts.length
+    unmount()
+
+    return { redrawn, asked }
+  }
+
+  /**
+   * The same three boxes, plus a real foreign key: ORDER.created_at → CUSTOMER.id.
+   *
+   * This is load-bearing, not set dressing. `schema()` has no foreign keys, so
+   * `tracedAttributesByEntity` stays EMPTY even mid-hover — every box falls through to the
+   * shared `NO_TRACED_ATTRIBUTES` whatever the memo does, and the test below passes with
+   * the mechanism deleted. Checked by deleting it: without an FK the mutant survives; with
+   * one it fails, 2 boxes redrawn against 1.
+   *
+   * Built through the real command rather than by hand for the usual reason — a
+   * hand-written `foreignKey` could satisfy the test while `setForeignKey` did not.
+   */
+  function schemaWithForeignKey(): Diagram {
+    const base = schema()
+    const [customer, order] = base.entities
+
+    return new CommandStack(base).execute(
+      setForeignKey(order!.id, order!.attributes[1]!.id, {
+        entityId: customer!.id,
+        attributeId: customer!.attributes[0]!.id,
+      }),
+    )
+  }
+
+  it('redraws no more boxes for a press during a hover than for one without (NFR-1.3)', () => {
+    const diagram = schemaWithForeignKey()
+    const [first] = diagram.entities
+    const target = first!.id
+
+    // The warm gesture: press a box with nothing hovered.
+    const warm = boxesRedrawnBySelecting(diagram, target, {})
+
+    // The cold gesture: the same press, with the hover it just started still active. This
+    // is the one the SRS exempts, and the one whose React cost must not differ.
+    const cold = boxesRedrawnBySelecting(diagram, target, { hoveredEntityId: target })
+
+    // Not vacuous: the comparator was asked about every box in both conditions.
+    expect(warm.asked).toBeGreaterThanOrEqual(3)
+    expect(cold.asked).toBeGreaterThanOrEqual(3)
+
+    // And it redrew only the box that actually changed, in both.
+    expect(warm.redrawn).toBeLessThanOrEqual(1)
+    expect(
+      cold.redrawn,
+      'a press that lands during a hover now redraws more boxes than one that does not. ' +
+        "NFR-1.3's exemption for the cold click rests on the press doing IDENTICAL React " +
+        'work in both conditions (4 EntityNode / 32 AttributeRow, counted in Chrome); if ' +
+        'that is no longer true the exemption is unearned and the SRS row needs revisiting, ' +
+        'not this number.',
+    ).toBe(warm.redrawn)
+  })
 })
