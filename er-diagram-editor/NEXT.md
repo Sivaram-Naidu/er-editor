@@ -289,6 +289,21 @@ stored beside it — and again the useful part is what the mutants said about th
 | No new state, no second dismissal path            | The pin is `selectedRelationshipIds` when it holds exactly one. Reduced to a scalar before it reaches the `traced` memo on purpose: passing the Set would put an identity that changes on every selection into `tracedAttributesByEntity`'s dependencies and redraw every box on a selection render — the NFR-1.3 defect its own guard exists to catch.                      |
 | The gate                                          | `pnpm verify` green: 777 unit tests in 35 files, 24 e2e specs, typecheck and lint clean.                                                                                                                                                     |
 
+### Verified in a real browser (Chrome, 12 Sep 2026 — clipboard session)
+
+FR-7.4, the first entry in Tier 3. `pnpm test:e2e` plus eleven unit tests on the planner.
+
+| Thing                                              | Evidence                                                                                                                                                                                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Duplicate copies without disturbing the original   | Ctrl+D on `CUSTOMER` produces `CUSTOMER_copy` at a different transform while `CUSTOMER`'s transform is **byte-identical**. One Ctrl+Z removes it and puts nothing else back.                                                          |
+| Repeated pastes cascade instead of stacking        | Ctrl+C then Ctrl+V twice gives `CUSTOMER_copy` and `CUSTOMER_copy_2` at **different** transforms. Mutating the step counter to a constant makes this the assertion that fails — a second copy exactly on the first is indistinguishable from nothing having happened. |
+| A copy is a copy, not a second reference           | Fresh entity ids AND fresh attribute ids, asserted. Sharing attribute ids would mean renaming a column in one box renamed it in the other, which looks like a rendering bug rather than an aliasing one.                               |
+| Half-copied relationships are left behind          | Copying `CUSTOMER` alone takes no relationship; copying it with `ORDER` takes the one between them, and the pasted edge joins the two COPIES. An edge pointing back at an original looks identical on the canvas until you move one.  |
+| **References are re-pointed or dropped, never carried** | Inside the copied set a foreign key follows the copy; outside it, it keeps pointing at the original while that original is present; pasting into a **different document** drops it and counts it. Mutated to carry it blindly, the test fails — the document no longer parses. |
+| Every clipboard test ends by parsing the result    | Same reason as the merge: a dangling `foreignKey.attributeId` does not render oddly, it makes the document refuse to load. `parentId` follows the same rule; `groupId` is dropped, groups not being copied.                            |
+| Nothing shouted in the browser                     | Zero `role="alert"` through duplicate, undo, copy and two pastes.                                                                                                                                                                     |
+| The gate                                           | `pnpm verify` green: 788 unit tests in 36 files, 25 e2e specs, typecheck and lint clean.                                                                                                                                              |
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -366,9 +381,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 777 unit tests in 35 files, ~48s. Coverage 92.7% statements / 83.9% branches / 93.9%
+- 788 unit tests in 36 files, ~50s. Coverage 92.7% statements / 83.5% branches / 93.9%
   lines against an 80% gate.
-- **24 e2e specs in 3 files, ~52s, all passing.** No `test.fail()` markers left. `pnpm
+- **25 e2e specs in 3 files, ~55s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -514,10 +529,9 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. Copy / paste / duplicate (FR-7.4); snap-to-grid and alignment guides (FR-3.5); keyboard
-   shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
-   `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
-   "N more" row.
+1. Snap-to-grid and alignment guides (FR-3.5); keyboard shortcut sheet (FR-9.1); marquee
+   select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and tested, only
+   unwired); expanding one entity from the "N more" row.
 
 ---
 

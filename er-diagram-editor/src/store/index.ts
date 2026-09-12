@@ -8,6 +8,12 @@ export {
   type DiagramStoreState,
 } from './diagramStore'
 export {
+  createClipboardStore,
+  useClipboardStore,
+  type ClipboardState,
+  type ClipboardStore,
+} from './clipboardStore'
+export {
   createSelectionStore,
   useSelectionStore,
   type SelectionState,

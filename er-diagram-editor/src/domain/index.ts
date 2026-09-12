@@ -5,6 +5,7 @@
 // eslint.config.js and covered by tests/unit/architecture/boundaries.test.ts.
 
 export * from './model'
+export * from './clipboard'
 export * from './commands'
 export * from './graph'
 export * from './merge'

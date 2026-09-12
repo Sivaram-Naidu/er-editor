@@ -7,6 +7,10 @@ import {
   addEntity,
   addRelationship,
   applyMerge,
+  copyEntities,
+  PASTE_OFFSET,
+  pasteEntities,
+  planPaste,
   createAttribute,
   createEntity,
   createRelationship,
@@ -34,6 +38,7 @@ import { ValidationPanel, ValidationToggle, useValidationReport } from '../valid
 
 import { THEME_OPTIONS, useApplyTheme } from './useApplyTheme'
 import {
+  useClipboardStore,
   useDiagramStore,
   useSelectionStore,
   useUiStore,
@@ -85,6 +90,11 @@ export function Editor(): React.ReactElement {
   const setHoveredEntity = useSelectionStore((state) => state.setHoveredEntity)
   const setHoveredRelationship = useSelectionStore((state) => state.setHoveredRelationship)
   const reconcile = useSelectionStore((state) => state.reconcile)
+
+  const clipboardPayload = useClipboardStore((state) => state.payload)
+  const pasteCount = useClipboardStore((state) => state.pasteCount)
+  const copyToClipboard = useClipboardStore((state) => state.copy)
+  const notePasted = useClipboardStore((state) => state.notePasted)
 
   const lod = useViewportStore((state) => state.lod)
   const lodOverride = useViewportStore((state) => state.lodOverride)
@@ -168,6 +178,49 @@ export function Editor(): React.ReactElement {
     const commands: Command[] = ids.map((id) => deleteEntity(id))
     transaction(ids.length === 1 ? 'Delete entity' : 'Delete entities', commands)
   }, [selectedEntityIds, selectedRelationshipIds, transaction])
+
+  /*
+   * Copy / cut / paste / duplicate (FR-7.4).
+   *
+   * The clipboard holds a PAYLOAD rather than a set of ids, so it survives the entities it
+   * was filled from being deleted — which is exactly what cut does a line later.
+   */
+  const handleCopy = useCallback((): boolean => {
+    if (selectedEntityIds.size === 0) return false
+    copyToClipboard(copyEntities(diagram, selectedEntityIds))
+    return true
+  }, [diagram, selectedEntityIds, copyToClipboard])
+
+  const handleCut = useCallback(() => {
+    // Copy first: after the delete there is nothing left to read.
+    if (handleCopy()) handleDeleteSelection()
+  }, [handleCopy, handleDeleteSelection])
+
+  const handlePaste = useCallback(() => {
+    if (clipboardPayload === undefined || clipboardPayload.entities.length === 0) return
+
+    // Each paste of the same payload steps one offset further out. Without it the second
+    // Ctrl+V lands exactly on the first and reads as nothing having happened.
+    const step = pasteCount + 1
+    const result = planPaste(diagram, clipboardPayload, {
+      x: PASTE_OFFSET.x * step,
+      y: PASTE_OFFSET.y * step,
+    })
+
+    execute(pasteEntities(result))
+    notePasted()
+    selectEntities([...result.newEntityIds])
+  }, [clipboardPayload, pasteCount, diagram, execute, notePasted, selectEntities])
+
+  const handleDuplicate = useCallback(() => {
+    if (selectedEntityIds.size === 0) return
+
+    // Deliberately does NOT touch the clipboard — duplicating something should not cost you
+    // whatever you had copied. Same plan, different word on the undo button.
+    const result = planPaste(diagram, copyEntities(diagram, selectedEntityIds))
+    execute(pasteEntities(result, 'Duplicate'))
+    selectEntities([...result.newEntityIds])
+  }, [diagram, selectedEntityIds, execute, selectEntities])
 
   const handleMove = useCallback(
     (positions: Record<EntityId, Point>) => {
@@ -282,6 +335,33 @@ export function Editor(): React.ReactElement {
         redo()
         return
       }
+      /*
+       * FR-7.4. These shadow the browser's own clipboard keys, which is safe here and only
+       * here: the typing guard above has already returned for anything focused in an input,
+       * a textarea or a contenteditable, so copying TEXT still works everywhere text is.
+       * On the canvas there is no text selection to serve, and Ctrl+D would otherwise open
+       * a bookmark dialog over the diagram.
+       */
+      if (modifier && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        handleCopy()
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'x') {
+        event.preventDefault()
+        handleCut()
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'v') {
+        event.preventDefault()
+        handlePaste()
+        return
+      }
+      if (modifier && event.key.toLowerCase() === 'd') {
+        event.preventDefault()
+        handleDuplicate()
+        return
+      }
       if (!modifier && event.key.toLowerCase() === 'e') {
         event.preventDefault()
         handleAddEntity()
@@ -314,6 +394,10 @@ export function Editor(): React.ReactElement {
     handleAddEntity,
     handleAddRelationship,
     handleDeleteSelection,
+    handleCopy,
+    handleCut,
+    handlePaste,
+    handleDuplicate,
     selectEntities,
   ])
 

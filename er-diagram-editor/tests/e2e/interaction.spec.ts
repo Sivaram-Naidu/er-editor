@@ -482,3 +482,53 @@ test('clicking a connector pins the trace so you can pan while following it (FR-
   await expect(page.locator('.erd-node[data-traced]')).toHaveCount(0)
   await expect(page.locator('.erd-canvas[data-tracing]')).toHaveCount(0)
 })
+
+/** A box's transform, in diagram units — the client rect is screen pixels and moves with zoom. */
+async function transformOf(page: Page, name: string): Promise<string> {
+  return entity(page, name).evaluate((node) => (node as HTMLElement).style.transform)
+}
+
+test('duplicate and paste copy the selection without moving the original (FR-7.4)', async ({
+  page,
+}) => {
+  /*
+   * The assertions that matter are the ones a screenshot would not settle: that the copy is
+   * a COPY rather than a second reference to the same box, and that pasting twice does not
+   * put the second copy exactly on top of the first — which looks identical to nothing
+   * having happened.
+   */
+  await openSample(page)
+
+  const before = await transformOf(page, 'CUSTOMER')
+  await entity(page, 'CUSTOMER').click()
+  expect(await selectedIds(page)).toHaveLength(1)
+
+  // DUPLICATE.
+  await page.keyboard.press('Control+d')
+  await expect(entity(page, 'CUSTOMER_copy')).toBeVisible()
+
+  expect(await transformOf(page, 'CUSTOMER'), 'the original moved').toBe(before)
+  expect(await transformOf(page, 'CUSTOMER_copy')).not.toBe(before)
+
+  // One undo step, not one per box and not one per attribute.
+  await page.keyboard.press('Control+z')
+  await expect(entity(page, 'CUSTOMER_copy')).toHaveCount(0)
+  expect(await transformOf(page, 'CUSTOMER')).toBe(before)
+
+  // COPY, then PASTE TWICE. The second paste has to land somewhere else.
+  await entity(page, 'CUSTOMER').click()
+  await page.keyboard.press('Control+c')
+  await page.keyboard.press('Control+v')
+  await expect(entity(page, 'CUSTOMER_copy')).toBeVisible()
+  await page.keyboard.press('Control+v')
+  await expect(entity(page, 'CUSTOMER_copy_2')).toBeVisible()
+
+  expect(
+    await transformOf(page, 'CUSTOMER_copy_2'),
+    'the second paste landed on top of the first',
+  ).not.toBe(await transformOf(page, 'CUSTOMER_copy'))
+
+  // Nothing shouted, and the document is still loadable — a dangling reference would have
+  // surfaced as a validation alert rather than as a crash.
+  await expect(page.getByRole('alert')).toHaveCount(0)
+})
