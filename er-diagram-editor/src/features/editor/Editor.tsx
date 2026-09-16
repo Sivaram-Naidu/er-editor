@@ -21,6 +21,7 @@ import {
   renameAttribute,
   renameDiagram,
   renameEntity,
+  setPinned,
   type AttributeId,
   type Command,
   type EntityId,
@@ -329,6 +330,19 @@ export function Editor(): React.ReactElement {
       selectAttribute: (entityId, attributeId: AttributeId) => {
         selectEntities([entityId])
         selectAttribute(attributeId)
+      },
+      /*
+       * FR-2.7, reached from the "N more" row on the box itself.
+       *
+       * Through the command stack, and that is not an oversight: `layout.pinned` is part
+       * of the DOCUMENT, so which tables you expanded survives a reload and travels with
+       * an exported `.erd.json`. That also makes it undoable, which reads oddly next to
+       * the theme — but unlike the theme it changes what the diagram looks like to
+       * everyone who opens it, and the command has carried the label "Pin entity" since
+       * the stage that reserved it.
+       */
+      setEntityPinned: (entityId, pinned) => {
+        execute(setPinned(entityId, pinned))
       },
     }),
     [execute, selectEntities, selectAttribute],

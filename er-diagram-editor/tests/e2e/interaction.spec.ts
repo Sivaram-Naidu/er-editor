@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 
 import {
   coldClick,
@@ -7,6 +7,7 @@ import {
   nodeBoxes,
   openSample,
   selectedIds,
+  storedDiagrams,
   viewportZoom,
   waitForPersisted,
   type NodeBox,
@@ -991,4 +992,104 @@ test('isolate is a view, not an edit (FR-2.8)', async ({ page }) => {
   await expect(page.locator('.react-flow__node')).toHaveCount(2)
   await expect(page.getByText('2 of 4 entities')).toBeVisible()
   await expect(page.getByRole('button', { name: /^Undo$/ })).toBeDisabled()
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EXPANDING ONE ENTITY FROM THE "N MORE" ROW (FR-2.7)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// At L1 a box draws its keys and says "2 more" about the rest. That row was a `<div>` —
+// a statement about what is missing, with no way to see it — and it is the row every user
+// tries to click. It is a pin now: press it and this ONE box holds full detail at any
+// zoom, which is what FR-2.7 asks for and what `layout.pinned` has been reserved for since
+// Stage 1.
+
+/** The footer row on a box: "2 more" when collapsed, "Pinned" when held open. */
+function moreRow(page: Page, name: string): Locator {
+  return entity(page, name).locator('.erd-node__more')
+}
+
+test('the "N more" row expands that one table, and keeps it open (FR-2.7)', async ({ page }) => {
+  await openSample(page)
+  await page.getByLabel('Detail').selectOption({ label: 'Keys' })
+
+  const order = entity(page, 'ORDER')
+  await expect(moreRow(page, 'ORDER')).toHaveText('2 more')
+  await expect(order.locator('.erd-attr')).toHaveCount(2)
+
+  await moreRow(page, 'ORDER').click()
+
+  await expect(order.locator('.erd-attr')).toHaveCount(4)
+  await expect(moreRow(page, 'ORDER')).toHaveText('Pinned')
+  // Per box, not per canvas: CUSTOMER is still on the view's level.
+  await expect(entity(page, 'CUSTOMER').locator('.erd-attr')).toHaveCount(1)
+
+  /*
+   * THE ASSERTION THAT IS THE REQUIREMENT. "Regardless of zoom level" — so drop the whole
+   * diagram to name-only and the pinned box must not follow. Without the pin reaching
+   * `effectiveLod` this is where it fails: everything collapses together and the feature
+   * is just a one-shot expand.
+   */
+  await page.getByLabel('Detail').selectOption({ label: 'Names' })
+  await expect(entity(page, 'CUSTOMER').locator('.erd-attr')).toHaveCount(0)
+  await expect(order.locator('.erd-attr')).toHaveCount(4)
+
+  // And the way back, from the same row, at a zoom where it is the only control there is.
+  await moreRow(page, 'ORDER').click()
+  await expect(order.locator('.erd-attr')).toHaveCount(0)
+})
+
+test('pinning is one undoable step, and survives a reload (FR-2.7)', async ({ page }) => {
+  // `layout.pinned` is part of the DOCUMENT, so which tables you expanded travels with the
+  // file and comes back after a reload. That also makes it undoable — deliberately, unlike
+  // the theme, because it changes what the diagram looks like to everyone who opens it.
+  await openSample(page)
+  await page.getByLabel('Detail').selectOption({ label: 'Keys' })
+  await moreRow(page, 'ORDER').click()
+
+  // One step, named. Undone and redone BEFORE the reload, because the command stack is
+  // per session — FR-7.2 restores the document, not the history — so testing undo after a
+  // reload would be testing something the tool does not claim.
+  await expect(page.getByRole('button', { name: /^Undo$/ })).toHaveAttribute(
+    'title',
+    'Undo Pin entity',
+  )
+  await page.keyboard.press('Control+z')
+  await expect(moreRow(page, 'ORDER')).toHaveText('2 more')
+  await page.keyboard.press('Control+Shift+z')
+  await expect(moreRow(page, 'ORDER')).toHaveText('Pinned')
+
+  // Not `waitForPersisted`, which only asks whether ANYTHING has been saved — and by now
+  // the sample itself has been, so it returns before the pin's own write lands. Poll for
+  // the pin.
+  await expect
+    .poll(async () => (await storedDiagrams(page))[0]?.layout.pinned.length ?? 0, {
+      message: 'the pin never reached IndexedDB',
+    })
+    .toBe(1)
+
+  await page.reload()
+  await expect(entity(page, 'ORDER')).toBeVisible()
+  await page.getByLabel('Detail').selectOption({ label: 'Keys' })
+  await expect(moreRow(page, 'ORDER')).toHaveText('Pinned')
+  await expect(entity(page, 'ORDER').locator('.erd-attr')).toHaveCount(4)
+})
+
+test('pressing the row does not drag the table (FR-2.7)', async ({ page }) => {
+  // It sits inside a draggable node, so the press has to be stopped from starting a drag
+  // — the same reason `+ Add field` stops it. A box that shifts when you click to read it
+  // is worse than a box that cannot be expanded.
+  await openSample(page)
+  await page.getByLabel('Detail').selectOption({ label: 'Keys' })
+
+  const before = await entity(page, 'ORDER').evaluate(
+    (node) => (node as HTMLElement).style.transform,
+  )
+  await moreRow(page, 'ORDER').click()
+  await expect(moreRow(page, 'ORDER')).toHaveText('Pinned')
+
+  const after = await entity(page, 'ORDER').evaluate(
+    (node) => (node as HTMLElement).style.transform,
+  )
+  expect(after).toBe(before)
 })

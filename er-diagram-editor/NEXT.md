@@ -408,6 +408,43 @@ The filter is kept for what it saves in objects BUILT, not in lines drawn, and t
 comment no longer claims to be testing it. Worth knowing generally: handing React Flow a
 partial node list is safe.
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — pin session)
+
+The last entry in Tier 3's interaction list, and it turned out to be FR-2.7: `layout.pinned`
+was in the schema, `setPinned` was a command with an undo label, and `effectiveLod` was
+written and tested. Nothing had ever called any of them.
+
+| Thing                                                    | Evidence                                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The row is a control now                                  | `2 more` was a `<div>` — a statement about what is missing, with no way to see it, and the row every user tries to click. Pressing it takes ORDER from 2 rows to 4. CUSTOMER beside it stays on the view's level.                              |
+| **It survives a zoom-out, which IS the requirement**      | Detail set to Names: CUSTOMER draws 0 rows at **41px**, the pinned ORDER draws 4 at **208px**. Screenshot. Mutating `effectiveLod` to ignore the pin collapses them together and the spec fails by name.                                       |
+| The row height did not move                               | `moreHeight` **30px**, exactly `METRICS.moreRowHeight`. A button brings its own padding and border: removing those two declarations fails the new L1 measurement spec by 16px on a real fixture — checked.                                     |
+| ELK is told the pinned size                               | `measureAll` resolves the pin through the same `effectiveLod`. Mutated to ignore pins and the unit pair fails: a pinned box would be laid out three rows tall and drawn fifteen, with its neighbour underneath it.                            |
+| One undoable step, and it persists                         | Undo reads "Undo Pin entity"; Ctrl+Z collapses, Ctrl+Shift+Z restores. The pin reaches IndexedDB and comes back after a reload — polled for the pin itself, not for the row count.                                                            |
+| Pressing it does not drag the box                          | Transform byte-identical across the click.                                                                                                                                                                                                     |
+| The gate                                                   | `pnpm verify` green: 864 unit tests in 40 files, 44 e2e specs. Coverage 93.0 / 84.2 / 94.2.                                                                                                                                                     |
+
+**Two things this found that were nothing to do with pins.**
+
+1. **`METRICS.moreRowHeight` had never been compared with the DOM.** The measurement spec
+   only ever visited L2, and that row is only drawn at L1. It checks both levels now, which
+   is what made the button change safe to land.
+2. **L1 width is over-estimated by ~12px on a long row, and L2 could never see it.**
+   `rowWidth` is biased upward on purpose, but every wide table in `wide-names.sql` exceeds
+   `maxWidth` at L2 and clamps to 300 on both sides, so the bias was invisible and the 8px
+   tolerance was calibrated against a number that could not move. L1 draws the same table
+   at 288px and the bias shows. The L1 tolerance is 14px with that reasoning written down;
+   the assertion that protects the layout — never SMALLER than drawn — is unchanged and
+   absolute. **If it has to rise again, fix the bias in `rowWidth` rather than the
+   constant.**
+
+**And one comment of mine was wrong twice before it was right.** The width scan now honours
+the detail level (an L1 box was sized from the widest column in the table even when that
+column is not drawn) — but that is NOT what the 12px above is, and the first version of the
+comment said it was. Nor is `font: inherit` what the measurement spec catches; the padding
+is. Both claims were checked by removing the code and re-running, and both comments now say
+only what was demonstrated.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -485,9 +522,11 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 855 unit tests in 40 files, ~50s. Coverage 93.1% statements / 84.1% branches / 94.2%
+- 864 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
   lines against an 80% gate.
-- **40 e2e specs in 3 files, ~95s, all passing.** No `test.fail()` markers left. `pnpm
+- **44 e2e specs in 3 files, ~85s, all passing.** `measurement.spec.ts` now checks L1 as
+  well as L2 — the level that draws the "N more" row, and the only one where
+  `METRICS.moreRowHeight` can be compared with the DOM at all. No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -495,7 +534,7 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
   assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
   and says why.
-- Bundle 747 kB raw, 234 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
+- Bundle 748 kB raw, 234 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
   stale by ~18 kB: measured against the commit before FR-3.5 the figure was already
   737/231, and snapping added 4 kB raw / 1.3 kB gzipped. Re-measure the PREVIOUS COMMIT
   before attributing a bundle change to your own work.) Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
@@ -504,7 +543,8 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
 - 3 view controls that narrow what the canvas draws without touching the document: LOD
-  (FR-2.4), culling (NFR-2.4) and isolate (FR-2.8). None of them reaches the store.
+  (FR-2.4), culling (NFR-2.4) and isolate (FR-2.8). None of them reaches the store. Pins
+  (FR-2.7) are the exception and are in the document on purpose — see the tier note.
 - 14 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — two of which
   (the arrow keys, and Shift for the marquee) are documented rather than bound, and say so.
 - **4 tiers of React Flow node change**, in `render/reactflow/trace.ts`: in-flight
@@ -645,16 +685,26 @@ computed by the same pure function that then gets applied — not a second descr
 
 ## Tier 3 — the features that matter at 100+ tables
 
-In order:
+**The interaction list is CLEAR as of 16 Sep 2026.** Marquee select (FR-2.9), isolate mode
+(FR-2.8), per-entity pins (FR-2.7) and the shortcut sheet (FR-9.1) are all built, with
+browser evidence above. What is left in this tier is one small correctness item, and after
+that the tier is empty.
 
-1. Expanding one entity from the "N more" row.
-2. **The palette is missing four commands it claims to have (FR-9.2).** Found while
+1. **The palette is missing four commands it claims to have (FR-9.2).** Found while
    building the shortcut sheet, not before: the sheet lists copy, cut, paste and duplicate
    because the keymap binds them, and the Ctrl+K palette offers none of the four. FR-9.2's
    wording is "every command", so its SRS row has been corrected from Done to Partial
    rather than the gap being left to be rediscovered. The fix is four entries in
    `paletteCommands` in `Editor.tsx`, next to the handlers that already exist — small, but
    it is a different feature from this one and was not folded into it.
+
+**Expanding one entity from the "N more" row came off this list on 16 Sep 2026, and it was
+FR-2.7 all along** — see the browser table above. Worth not re-deriving: the pin lives in
+`layout.pinned`, which is part of the DOCUMENT, so it is undoable and it travels with the
+file. That reads oddly beside the theme, which is deliberately NOT in the document — the
+difference is that a pin changes what the diagram looks like to everyone who opens it. The
+row says `Pinned` rather than `Show less` because at L2 releasing the pin changes nothing on
+screen until you zoom out, and a label naming an effect that may not happen is not honest.
 
 **Isolate mode (FR-2.8) came off this list on 16 Sep 2026** — see the browser table above.
 Three decisions worth not re-opening. **Hide, not dim.** **With nothing selected the mode

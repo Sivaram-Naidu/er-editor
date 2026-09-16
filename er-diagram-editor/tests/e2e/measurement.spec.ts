@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 import { importSql } from '../../src/io'
 import { measureAll } from '../../src/layout'
@@ -39,10 +39,32 @@ const WIDE_NAMES = readFileSync(join('tests', 'fixtures', 'wide-names.sql'), 'ut
  */
 const MAX_OVER_ESTIMATE_PX = 8
 
-test('measure.ts never tells ELK a box is smaller than the browser draws', async ({ page }) => {
+/**
+ * L1 is allowed more slack than L2, and the reason is that L2 could never see the error.
+ *
+ * `rowWidth` is biased upward on purpose — too big spaces boxes apart, too small stacks
+ * them — and on a long row that bias is about 12px. At L2 every wide table in this fixture
+ * exceeds `METRICS.maxWidth` and clamps to 300 on both sides, so the bias is invisible and
+ * 8px was calibrated against a number that could not move. At L1 the same table draws one
+ * key row at 288px and the bias shows.
+ *
+ * Raised for L1 only, and only for width: 12px on a 288px box is 4%, which does not push
+ * boxes apart in any way a reader would notice. The assertion that actually protects the
+ * layout — never SMALLER than the browser draws — is unchanged and absolute at both
+ * levels. If this number has to go up again, the bias in `rowWidth` is the thing to look
+ * at, not this constant.
+ */
+const MAX_OVER_ESTIMATE_L1_PX = 14
+
+/**
+ * The shared body of both checks: import the fixture, pin the detail level, and compare
+ * every drawn box against the estimate for that level.
+ */
+async function compareAtLevel(page: Page, level: 1 | 2, label: string): Promise<void> {
+  const slack = level === 1 ? MAX_OVER_ESTIMATE_L1_PX : MAX_OVER_ESTIMATE_PX
   // The same two pure functions the layout path uses, on the same input.
   const { diagram } = importSql(WIDE_NAMES, { dialect: 'postgres', diagramName: 'wide-names' })
-  const predicted = measureAll(diagram, 2)
+  const predicted = measureAll(diagram, level)
   const byName = new Map(
     diagram.entities.map((entity) => [entity.name, predicted[entity.id]] as const),
   )
@@ -53,7 +75,7 @@ test('measure.ts never tells ELK a box is smaller than the browser draws', async
   await expect(page.locator('.react-flow__node')).toHaveCount(diagram.entities.length)
 
   // Pin the detail level, or the box heights depend on the zoom the layout happened at.
-  await page.getByLabel('Detail').selectOption({ label: 'All fields' })
+  await page.getByLabel('Detail').selectOption({ label })
   await expect.poll(async () => nodeTransforms(page)).not.toEqual([])
   await page.waitForTimeout(500)
 
@@ -92,10 +114,28 @@ test('measure.ts never tells ELK a box is smaller than the browser draws', async
     expect(
       estimate!.height - box.height,
       `${box.name}: measure.ts over-estimates height by ${String(estimate!.height - box.height)}px`,
-    ).toBeLessThanOrEqual(MAX_OVER_ESTIMATE_PX)
+    ).toBeLessThanOrEqual(slack)
     expect(
       estimate!.width - box.width,
       `${box.name}: measure.ts over-estimates width by ${String(estimate!.width - box.width)}px`,
-    ).toBeLessThanOrEqual(MAX_OVER_ESTIMATE_PX)
+    ).toBeLessThanOrEqual(slack)
   }
+}
+
+test('measure.ts never tells ELK a box is smaller than the browser draws', async ({ page }) => {
+  await compareAtLevel(page, 2, 'All fields')
+})
+
+/**
+ * THE LEVEL WHERE THE "N MORE" ROW EXISTS, AND THE ONE NOBODY WAS CHECKING.
+ *
+ * `METRICS.moreRowHeight` is 30px of height ELK is told about, and it is only ever drawn
+ * at L1 — which the spec above does not visit. So the constant had never once been
+ * compared with the DOM. That mattered on 16 Sep 2026, when FR-2.7's pin turned that row
+ * from a `<div>` into a `<button>`: a button brings its own font, line-height and padding,
+ * and any of the three would have made every L1 box taller than the layout believed
+ * without a single test noticing.
+ */
+test('measure.ts is right about the "N more" row, which only L1 draws', async ({ page }) => {
+  await compareAtLevel(page, 1, 'Keys')
 })

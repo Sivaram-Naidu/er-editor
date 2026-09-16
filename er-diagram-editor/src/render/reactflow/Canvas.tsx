@@ -27,7 +27,7 @@ import {
   type RelationshipId,
   type Severity,
 } from '../../domain'
-import type { LodLevel } from '../../lib/lod'
+import { effectiveLod, type LodLevel } from '../../lib/lod'
 
 import { RelationshipEdge, type RelationshipEdgeData } from './edges/RelationshipEdge'
 import { CrowsFootMarkers } from './edges/endpoints'
@@ -360,6 +360,17 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
 
   const isolation = props.isolation
 
+  /**
+   * Entities held at full detail regardless of zoom (FR-2.7).
+   *
+   * Read from the DOCUMENT rather than taken as a prop, and that is what makes the pin
+   * travel: the image-export surface mounts its own `Canvas` with the same diagram, so a
+   * box the user expanded is expanded in the PNG too, with no second prop to remember to
+   * thread through. It is memoised on `layout.pinned` rather than on `diagram`, so moving
+   * a box does not mint a new Set and invalidate every node's data.
+   */
+  const pinned = useMemo(() => new Set(diagram.layout.pinned), [diagram.layout.pinned])
+
   const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
     /* The index is kept over the WHOLE entity list, not the filtered one, so a box keeps
        its fallback grid slot when isolate is turned on and off. Renumbering the survivors
@@ -382,7 +393,10 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         banded === undefined ? props.selectedEntityIds.has(entity.id) : banded.has(entity.id),
       data: {
         entity,
-        lod,
+        // Resolved per entity, not per canvas: `props.lod` is what the VIEW is showing and
+        // a pinned box ignores it. The same call sizes the box in `measureAll`, or ELK
+        // would lay this one out three rows tall while the browser draws fifteen.
+        lod: effectiveLod(lod, pinned.has(entity.id)),
         isTraced: traced.entities.has(entity.id),
         tracedAttributeIds: tracedAttributesByEntity.get(entity.id) ?? NO_TRACED_ATTRIBUTES,
         selectedAttributeId: props.selectedAttributeId,
@@ -390,6 +404,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         editable: props.editable,
         issueSeverity: issueSeverityByEntity.get(entity.id),
         hiddenNeighbours: isolation?.hiddenNeighbours.get(entity.id),
+        isPinned: pinned.has(entity.id),
       },
     }))
   }, [
@@ -400,6 +415,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     foreignKeyTargets,
     banded,
     isolation,
+    pinned,
     props.selectedEntityIds,
     props.selectedAttributeId,
     props.editable,

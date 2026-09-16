@@ -115,6 +115,93 @@ describe('measurement', () => {
   })
 })
 
+describe('width at L1', () => {
+  it('is set by the rows that are DRAWN, not by the widest column in the table', () => {
+    /*
+     * At L1 a box shows keys only, so a 60-character non-key column contributes nothing to
+     * how wide the browser draws it. Sizing for it anyway is whitespace in every layout at
+     * that level, for a row nobody can see.
+     *
+     * This case has no representative in `wide-names.sql` — every wide table there clamps
+     * at `maxWidth` whichever rule is used, which is why the browser spec cannot tell the
+     * two apart and this is asserted here instead.
+     */
+    const entity = createEntity({
+      name: 'F',
+      attributes: [
+        createAttribute({ name: 'id', isPrimaryKey: true }),
+        createAttribute({ name: 'a_very_long_non_key_column_name_indeed' }),
+      ],
+    })
+    const keyOnly = createEntity({
+      name: 'F',
+      attributes: [createAttribute({ name: 'id', isPrimaryKey: true })],
+    })
+
+    expect(measureEntity(entity, 1).width).toBe(measureEntity(keyOnly, 1).width)
+    // And the long column still counts at L2, where it is on screen.
+    expect(measureEntity(entity, 2).width).toBeGreaterThan(measureEntity(entity, 1).width)
+  })
+})
+
+describe('measuring a pinned entity (FR-2.7)', () => {
+  /** One entity with five fields, one of them a key, pinned. */
+  function pinned(): { diagram: Diagram; entity: Entity } {
+    const entity = createEntity({
+      name: 'ORDER',
+      attributes: [
+        createAttribute({ name: 'id', dataType: 'uuid', isPrimaryKey: true }),
+        ...Array.from({ length: 4 }, (_, i) => createAttribute({ name: `f${String(i)}` })),
+      ],
+    })
+    const base = createDiagram({ entities: [entity] })
+
+    return {
+      diagram: { ...base, layout: { ...base.layout, pinned: [entity.id] } },
+      entity,
+    }
+  }
+
+  /**
+   * THE PAIR, AND WHY IT IS HERE RATHER THAN IN THE RENDERER'S TESTS.
+   *
+   * A pin makes ONE box draw every field while the rest of the diagram is at L1 — that is
+   * the whole feature. `Canvas` resolves it with `effectiveLod`; `measureAll` has to
+   * resolve it the same way, because the number it produces is what ELK spaces boxes on.
+   * Get one of the two wrong and the diagram renders perfectly until the next auto-layout,
+   * at which point the pinned box is laid out three rows tall, drawn fifteen, and sits on
+   * top of its neighbour. Neither module is wrong on its own; the disagreement is the bug.
+   */
+  it('is sized at full detail even while the view is at L1', () => {
+    const { diagram, entity } = pinned()
+
+    expect(measureAll(diagram, 1)[entity.id]).toEqual(measureEntity(entity, 2))
+  })
+
+  it('is sized at full detail even while the view is at L0', () => {
+    const { diagram, entity } = pinned()
+
+    expect(measureAll(diagram, 0)[entity.id]?.height).toBe(measureEntity(entity, 2).height)
+  })
+
+  it('leaves every other entity at the level the view is on', () => {
+    // The pin is per box. Sizing the whole diagram at L2 because one box is pinned would
+    // fill the layout with whitespace, which is the other half of `measureAll`'s note.
+    const { diagram, entity } = pinned()
+    const other = createEntity({
+      name: 'CUSTOMER',
+      attributes: [
+        createAttribute({ name: 'id', isPrimaryKey: true }),
+        createAttribute({ name: 'email' }),
+        createAttribute({ name: 'phone' }),
+      ],
+    })
+    const withOther: Diagram = { ...diagram, entities: [entity, other] }
+
+    expect(measureAll(withOther, 1)[other.id]).toEqual(measureEntity(other, 1))
+  })
+})
+
 describe('toElkGraph', () => {
   it('sends every entity and relationship', () => {
     const { diagram } = chain(4)

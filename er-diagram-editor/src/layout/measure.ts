@@ -38,8 +38,8 @@
 // test that can: jsdom performs no layout, so a unit test has no rendered height to
 // disagree with.
 
-import type { Diagram, Entity, EntityId } from '../domain'
-import type { LodLevel } from '../lib/lod'
+import type { Attribute, Diagram, Entity, EntityId } from '../domain'
+import { effectiveLod, type LodLevel } from '../lib/lod'
 
 /**
  * Must track `canvas.css`. Changing padding or the type scale there without re-measuring
@@ -112,15 +112,31 @@ function badgeCount(entity: Entity, index: number): number {
   return count
 }
 
-/** Attributes drawn at this level of detail — must match EntityNode's own rule. */
+/**
+ * Is this attribute drawn at this level? Must match EntityNode's own rule.
+ *
+ * One predicate, used for BOTH the row count and the width scan. They used to disagree:
+ * the count honoured the level and the width did not, so an L1 box was sized from the
+ * widest column in the table even when that column was a non-key the box does not draw —
+ * whitespace in every layout at that level, for a row nobody can see.
+ *
+ * Worth being precise about what this did and did not fix, because the first version of
+ * this comment claimed the wrong thing. It does NOT account for the 12px over-estimate the
+ * L1 measurement spec finds on `wide-names.sql`: every wide table there clamps at
+ * `maxWidth` either way, so this change moves those boxes by nothing. That 12px is
+ * `rowWidth`'s deliberate upward bias on a ~290px row, which L2 never exposed because the
+ * clamp hides any error above 300px. What this fixes is the case with no test in that
+ * fixture — a short key beside a long non-key column — and `tests/unit/layout` now has it.
+ */
+function isDrawn(attribute: Attribute, lod: LodLevel): boolean {
+  if (lod === 0) return false
+  if (lod === 1) return attribute.isPrimaryKey || attribute.foreignKey !== undefined
+  return true
+}
+
+/** How many attributes are drawn at this level of detail. */
 function visibleAttributes(entity: Entity, lod: LodLevel): number {
-  if (lod === 0) return 0
-  if (lod === 1) {
-    return entity.attributes.filter(
-      (attribute) => attribute.isPrimaryKey || attribute.foreignKey !== undefined,
-    ).length
-  }
-  return entity.attributes.length
+  return entity.attributes.filter((attribute) => isDrawn(attribute, lod)).length
 }
 
 export function measureEntity(
@@ -131,14 +147,14 @@ export function measureEntity(
   const rows = visibleAttributes(entity, lod)
 
   let width = rowWidth(entity.name || 'unnamed', undefined, 0)
-  if (lod > 0) {
-    entity.attributes.forEach((attribute, index) => {
-      width = Math.max(
-        width,
-        rowWidth(attribute.name || 'unnamed', attribute.dataType, badgeCount(entity, index)),
-      )
-    })
-  }
+  // The INDEX is kept because `badgeCount` is positional; only drawn rows contribute.
+  entity.attributes.forEach((attribute, index) => {
+    if (!isDrawn(attribute, lod)) return
+    width = Math.max(
+      width,
+      rowWidth(attribute.name || 'unnamed', attribute.dataType, badgeCount(entity, index)),
+    )
+  })
 
   const hasMoreRow = lod === 1 && rows < entity.attributes.length
   const hasAddRow = editable && lod === 2
@@ -162,6 +178,12 @@ export function measureEntity(
  * while viewing L0 leaves oceans of white space; laying out for L0 while viewing L2
  * overlaps boxes. Neither is recoverable without re-running layout, so the current view
  * is the only defensible choice.
+ *
+ * Which is why PINS are read from the document here rather than taken as an argument
+ * (FR-2.7). A pinned box draws every field whatever the zoom, so measuring it at the
+ * view's level tells ELK it is three rows tall when it is fifteen, and the boxes below it
+ * end up underneath it. `effectiveLod` is the same rule the renderer draws with — one
+ * function, in `lib`, for exactly this reason.
  */
 export function measureAll(
   diagram: Diagram,
@@ -169,8 +191,10 @@ export function measureAll(
   editable = true,
 ): Record<EntityId, { width: number; height: number }> {
   const sizes: Record<EntityId, { width: number; height: number }> = {}
+  const pinned = new Set(diagram.layout.pinned)
+
   for (const entity of diagram.entities) {
-    sizes[entity.id] = measureEntity(entity, lod, editable)
+    sizes[entity.id] = measureEntity(entity, effectiveLod(lod, pinned.has(entity.id)), editable)
   }
   return sizes
 }

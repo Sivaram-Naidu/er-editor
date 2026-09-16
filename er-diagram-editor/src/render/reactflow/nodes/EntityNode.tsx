@@ -40,6 +40,15 @@ export interface EntityNodeData extends Record<string, unknown> {
    * than a walk.
    */
   hiddenNeighbours: number | undefined
+  /**
+   * Held at full detail whatever the zoom is (FR-2.7).
+   *
+   * `lod` above is already the RESOLVED level — `effectiveLod` has folded this in — so
+   * this is not how the box decides what to draw. It is how the box knows to offer the
+   * way back out, which nothing else can tell it: at L2 a pinned box and an unpinned one
+   * look identical.
+   */
+  isPinned: boolean
 }
 
 /**
@@ -77,6 +86,7 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
     editable,
     issueSeverity,
     hiddenNeighbours,
+    isPinned,
   } = data as unknown as EntityNodeData
   const actions = useEditorActions()
 
@@ -166,7 +176,48 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
         </div>
       )}
 
-      {hidden > 0 && lod === 1 ? <div className="erd-node__more">{hidden} more</div> : null}
+      {/* The "N more" row, and the way back (FR-2.7).
+       *
+       * It was a `<div>` reading "3 more", which is a statement about what is missing and
+       * no way to see it — the row every user tries to click. It is a button now, and the
+       * two states are the same control: press it to hold this box open, press it again to
+       * let it follow the zoom.
+       *
+       * "Pinned" rather than "Show less", because at L2 releasing the pin changes nothing
+       * on screen until you zoom out. A label naming the STATE is honest at every zoom;
+       * one naming an effect that may not happen is not. */}
+      {isPinned ? (
+        <button
+          type="button"
+          className="erd-node__more"
+          data-pinned="true"
+          onClick={() => {
+            actions.setEntityPinned(entity.id, false)
+          }}
+          onPointerDown={(event) => {
+            // Or the press starts a node drag and the click never lands — same reason the
+            // add-field button below stops it.
+            event.stopPropagation()
+          }}
+          title="Always showing every field. Click to follow the zoom again."
+        >
+          Pinned
+        </button>
+      ) : hidden > 0 && lod === 1 ? (
+        <button
+          type="button"
+          className="erd-node__more"
+          onClick={() => {
+            actions.setEntityPinned(entity.id, true)
+          }}
+          onPointerDown={(event) => {
+            event.stopPropagation()
+          }}
+          title={`Show all ${String(entity.attributes.length)} fields, at any zoom`}
+        >
+          {hidden} more
+        </button>
+      ) : null}
 
       {/* Adding a field belongs on the box, not in the panel: it is the second most
           common edit after renaming, and putting it here keeps the eyes on the diagram.

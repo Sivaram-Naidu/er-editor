@@ -88,6 +88,15 @@ model. Referential integrity is the exception and IS enforced, because a danglin
 reference makes a document unloadable. Modelling-quality checks belong in
 `domain/validation/`.
 
+**What level a box draws at is decided once, by `effectiveLod` in `lib/lod.ts`.** Both
+callers matter and the second is easy to forget: the renderer uses it to decide what to
+draw, and `layout/measure.ts` uses it to decide how big to tell ELK the box is. A pinned
+entity (FR-2.7) draws every field at any zoom, so a `measureAll` that ignores the pin sizes
+it at three rows while the browser draws fifteen and the next auto-layout puts its neighbour
+underneath it. That is why the function lives in `lib` rather than in `render` — `layout`
+may not import `render`, and re-deriving the rule there would be the second place that
+decides the same thing.
+
 **Keyboard shortcuts are declared once, in `features/editor/shortcuts.ts`.** That table IS
 the keymap: the window handler dispatches from it, the `?` sheet renders it, and the Ctrl+K
 palette formats its hints from the same `Chord` objects. A hand-written row in the sheet is
@@ -283,6 +292,16 @@ culling off.
   No unit test can do better here — jsdom performs no layout, so there is no rendered height
   to disagree with. `tests/e2e/measurement.spec.ts` compares the estimate against
   `offsetHeight` in Chrome, which is the only place the two can disagree.
+- **A clamp hides an estimator's error, so a tolerance calibrated where it clamps is
+  calibrated against nothing.** `measure.ts`'s width comes out biased ~12px high on a long
+  row — deliberately, since too big spaces boxes apart and too small stacks them — but every
+  wide table in `wide-names.sql` exceeds `METRICS.maxWidth` at L2 and clamps to 300 on both
+  sides, so the measurement spec's 8px tolerance was measuring the clamp. L1 draws the same
+  table at 288px and the bias is plainly visible. The spec checks both levels now, with a
+  separate L1 tolerance and the reason written next to it. Two lessons: check the level
+  where the constant is actually USED (`METRICS.moreRowHeight` is only ever drawn at L1 and
+  had never once been compared with the DOM), and be suspicious of any threshold that
+  passes comfortably — it may be sitting behind a clamp.
 - **`measure.ts`'s constants have to be MEASURED, not read off canvas.css by eye.** The
   previous set was wrong about the header (36 vs 38), the add-field row (24 vs 27), the "N
   more" row (folded into the add row, actually 30), the border (uncounted, and 2px or 4px

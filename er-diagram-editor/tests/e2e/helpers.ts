@@ -1,5 +1,7 @@
 import { expect, type Locator, type Page } from '@playwright/test'
 
+import type { Diagram } from '../../src/domain'
+
 /**
  * The entity box named exactly `name`.
  *
@@ -116,6 +118,43 @@ export async function waitForPersisted(page: Page): Promise<void> {
       { timeout: 10_000, message: 'the diagram never reached IndexedDB' },
     )
     .toBeGreaterThan(0)
+}
+
+/**
+ * The documents the autosaver has actually written, as stored.
+ *
+ * `waitForPersisted` above answers "has anything been saved yet", which is the right
+ * question for the reload spec — it opens the sample and waits for the row count to go
+ * from zero to one. It is the WRONG question for any change made afterwards: the count is
+ * already one, so it returns immediately and a reload can still race the 800 ms debounce.
+ * The pin spec failed exactly there, on a pin that was in fact saved a second later.
+ *
+ * So this returns the content, and the caller polls for the change it is waiting on.
+ */
+export async function storedDiagrams(page: Page): Promise<Diagram[]> {
+  return page.evaluate(
+    async () =>
+      new Promise<Diagram[]>((resolve) => {
+        const request = indexedDB.open('er-diagram-editor')
+        request.onsuccess = (): void => {
+          const db = request.result
+          if (![...db.objectStoreNames].includes('diagrams')) {
+            resolve([])
+            return
+          }
+          const all = db.transaction('diagrams', 'readonly').objectStore('diagrams').getAll()
+          all.onsuccess = (): void => {
+            resolve((all.result as { document: Diagram }[]).map((record) => record.document))
+          }
+          all.onerror = (): void => {
+            resolve([])
+          }
+        }
+        request.onerror = (): void => {
+          resolve([])
+        }
+      }),
+  )
 }
 
 /** Every node's `transform`, in DOM order. Diagram units, not screen pixels. */

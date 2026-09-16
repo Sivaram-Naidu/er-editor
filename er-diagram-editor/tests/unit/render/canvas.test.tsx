@@ -11,7 +11,7 @@ import {
   type Node,
   type NodeChange,
 } from '@xyflow/react'
-import { render, screen, type RenderResult } from '@testing-library/react'
+import { fireEvent, render, screen, type RenderResult } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -28,6 +28,7 @@ import {
 } from '../../../src/domain'
 import {
   AlignmentGuides,
+  EditorActionsProvider,
   EntityNode,
   applySelectionChanges,
   fallbackPosition,
@@ -38,6 +39,7 @@ import {
   settledPositions,
   sizesUnchanged,
   traceSets,
+  type EditorActions,
   type EntityNodeData,
   type Guide,
   type Size,
@@ -178,7 +180,18 @@ describe('fallbackPosition', () => {
  */
 type NodeRenderProps = Parameters<typeof EntityNode>[0]
 
-function renderNode(data: Partial<EntityNodeData> & { entity: Entity }): RenderResult {
+const NO_ACTIONS: EditorActions = {
+  renameEntity: () => undefined,
+  addAttribute: () => undefined,
+  renameAttribute: () => undefined,
+  selectAttribute: () => undefined,
+  setEntityPinned: () => undefined,
+}
+
+function renderNode(
+  data: Partial<EntityNodeData> & { entity: Entity },
+  actions?: EditorActions,
+): RenderResult {
   const props = {
     id: data.entity.id,
     type: 'entity',
@@ -198,13 +211,17 @@ function renderNode(data: Partial<EntityNodeData> & { entity: Entity }): RenderR
       selectedAttributeId: undefined,
       foreignKeyTargets: new Map<AttributeId, string>(),
       editable: false,
+      hiddenNeighbours: undefined,
+      isPinned: false,
       ...data,
     },
   } as unknown as NodeRenderProps
 
   return render(
     <ReactFlowProvider>
-      <EntityNode {...props} />
+      <EditorActionsProvider value={actions ?? NO_ACTIONS}>
+        <EntityNode {...props} />
+      </EditorActionsProvider>
     </ReactFlowProvider>,
   )
 }
@@ -259,6 +276,80 @@ describe('EntityNode level of detail (SRS §2.2, ADR-0004)', () => {
 
     expect(screen.getByText('customer_id')).toBeInTheDocument()
     expect(screen.queryByText('note')).not.toBeInTheDocument()
+  })
+})
+
+describe('the "N more" row (FR-2.7)', () => {
+  const wide = (): Entity =>
+    createEntity({
+      name: 'ORDER',
+      attributes: [
+        createAttribute({ name: 'id', isPrimaryKey: true }),
+        createAttribute({ name: 'placed_at' }),
+        createAttribute({ name: 'total' }),
+      ],
+    })
+
+  it('is a BUTTON, because it is the row every user tries to click', () => {
+    // It was a `<div>` reading "2 more" — a statement about what is missing with no way to
+    // see it. Asserting the role rather than the text is the point: the text was always
+    // right and the control was not there.
+    renderNode({ entity: wide(), lod: 1 })
+
+    expect(screen.getByRole('button', { name: /2 more/ })).toBeInTheDocument()
+  })
+
+  it('pins the entity when pressed', () => {
+    const calls: [string, boolean][] = []
+    const entity = wide()
+    renderNode(
+      { entity, lod: 1 },
+      {
+        ...NO_ACTIONS,
+        setEntityPinned: (entityId, pinned) => calls.push([entityId, pinned]),
+      },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /2 more/ }))
+
+    expect(calls).toEqual([[entity.id, true]])
+  })
+
+  it('offers the way back out, and names the STATE rather than an effect', () => {
+    /*
+     * "Pinned", not "Show less". At L2 releasing the pin changes nothing on screen until
+     * the user zooms out, so a label naming an effect would describe something that does
+     * not visibly happen. Naming the state is true at every zoom — and this row is the
+     * only thing on the box that says the pin is on.
+     */
+    const entity = wide()
+    const calls: [string, boolean][] = []
+    renderNode(
+      { entity, lod: 2, isPinned: true },
+      {
+        ...NO_ACTIONS,
+        setEntityPinned: (entityId, pinned) => calls.push([entityId, pinned]),
+      },
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Pinned' }))
+
+    expect(calls).toEqual([[entity.id, false]])
+  })
+
+  it('offers nothing when there is nothing hidden and no pin to release', () => {
+    renderNode({ entity: wide(), lod: 2 })
+
+    expect(screen.queryByRole('button', { name: /more|Pinned/ })).not.toBeInTheDocument()
+  })
+
+  it('stays out of L0, where the DOM budget is the whole point', () => {
+    // ADR-0004: L0 is name-only so 120 entities cost ~120 DOM nodes rather than ~1,000.
+    // A row per box would double that to save a zoom. A pinned box always draws its own
+    // footer, so there is no dead end.
+    renderNode({ entity: wide(), lod: 0 })
+
+    expect(screen.queryByRole('button', { name: /more/ })).not.toBeInTheDocument()
   })
 })
 

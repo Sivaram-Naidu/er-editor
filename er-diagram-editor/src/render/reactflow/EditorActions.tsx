@@ -15,6 +15,8 @@ export interface EditorActions {
   addAttribute: (entityId: EntityId) => void
   renameAttribute: (entityId: EntityId, attributeId: AttributeId, name: string) => void
   selectAttribute: (entityId: EntityId, attributeId: AttributeId) => void
+  /** Pin this entity to full detail, or release it (FR-2.7). */
+  setEntityPinned: (entityId: EntityId, pinned: boolean) => void
 }
 
 const noop = (): void => {
@@ -27,6 +29,7 @@ const EditorActionsContext = createContext<EditorActions>({
   addAttribute: noop,
   renameAttribute: noop,
   selectAttribute: noop,
+  setEntityPinned: noop,
 })
 
 export const EditorActionsProvider = EditorActionsContext.Provider

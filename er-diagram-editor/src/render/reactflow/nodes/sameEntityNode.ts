@@ -40,7 +40,8 @@ function sameEntityNodeData(previous: EntityNodeData, next: EntityNodeData): boo
     previous.foreignKeyTargets === next.foreignKeyTargets &&
     previous.editable === next.editable &&
     previous.issueSeverity === next.issueSeverity &&
-    previous.hiddenNeighbours === next.hiddenNeighbours
+    previous.hiddenNeighbours === next.hiddenNeighbours &&
+    previous.isPinned === next.isPinned
   )
 }
 

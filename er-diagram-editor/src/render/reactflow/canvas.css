@@ -128,10 +128,45 @@
   flex-direction: column;
 }
 
+/* The "N more" row — a BUTTON since FR-2.7's pin was wired to it, and the same box model
+ * it had as a div.
+ *
+ * That last part is load-bearing rather than tidy. `METRICS.moreRowHeight` in `measure.ts`
+ * is what ELK is told this row costs, and a button brings its own padding and border: drop
+ * the two declarations below and the L1 measurement spec fails by 16px on a real fixture —
+ * checked, by removing them. So those two are the contract.
+ *
+ * `font: inherit` is NOT: removing it leaves the spec passing, because the size is already
+ * pinned and the height does not move. It is here so the row reads as the same row it was,
+ * not because a measurement demanded it — said explicitly so nobody removes the padding on
+ * the strength of this comment having overclaimed.
+ *
+ * `tests/e2e/measurement.spec.ts` now checks L1 as well as L2, which is the only place
+ * this contract can be checked at all — and L1 is the only level that draws this row, so
+ * before that it had never been compared with the DOM once. */
 .erd-node__more {
-  padding: var(--erd-space-1) var(--erd-space-3) var(--erd-space-2);
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
   font-size: var(--erd-text-xs);
+  padding: var(--erd-space-1) var(--erd-space-3) var(--erd-space-2);
   color: var(--erd-ink-faint);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.erd-node__more:hover {
+  color: var(--erd-signal);
+  background: var(--erd-signal-wash);
+}
+
+/* Pinned is a STATE, so it is coloured rather than left looking like an idle action —
+   this row is the only thing on the box that says the pin is on. */
+.erd-node__more[data-pinned] {
+  color: var(--erd-signal);
+  font-weight: 600;
 }
 
 /* ── Attribute row ───────────────────────────────────────────────────────── */
