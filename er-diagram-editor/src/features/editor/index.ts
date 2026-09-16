@@ -9,5 +9,15 @@ export { placeNewEntity, type PlacementRequest } from './placement'
 export { useAutoLayout } from './useAutoLayout'
 export { useAppliedTheme } from './useAppliedTheme'
 export { ThemeToggle } from './ThemeToggle'
+export { ShortcutsDialog, type ShortcutsDialogProps } from './ShortcutsDialog'
 export { SnapToggle } from './SnapToggle'
+export {
+  EDITOR_SHORTCUTS,
+  SHORTCUT_GROUPS,
+  findShortcut,
+  isTypingTarget,
+  type Shortcut,
+  type ShortcutGroup,
+  type ShortcutId,
+} from './shortcuts'
 export { useSnapToGrid } from './useSnapToGrid'

@@ -26,7 +26,7 @@ import {
   type Point,
   type RelationshipId,
 } from '../../domain'
-import { type LodLevel } from '../../lib'
+import { formatChord, isMacPlatform, type LodLevel } from '../../lib'
 import { measureEntity } from '../../layout'
 import { Canvas, EditorActionsProvider, type EditorActions } from '../../render'
 import { DiagramMenu, useDiagramLibrary } from '../diagram-manager'
@@ -50,8 +50,10 @@ import { EmptyState } from './EmptyState'
 import { buildConnectCommands } from './connect'
 import { placeNewEntity } from './placement'
 import { useAutoLayout } from './useAutoLayout'
+import { ShortcutsDialog } from './ShortcutsDialog'
 import { SnapToggle } from './SnapToggle'
 import { Toolbar } from './Toolbar'
+import { EDITOR_SHORTCUTS, findShortcut, isTypingTarget, type ShortcutId } from './shortcuts'
 import { useSnapToGrid } from './useSnapToGrid'
 import { buildSampleDiagram } from './sample'
 
@@ -290,6 +292,52 @@ export function Editor(): React.ReactElement {
     [execute, selectEntities, selectAttribute],
   )
 
+  /**
+   * What each shortcut id actually does (NFR-3.2).
+   *
+   * Typed as `Record<ShortcutId, …>`, which is the point: `shortcuts.ts` owns the list of
+   * commands and this owns their behaviour, and neither can gain an entry the other does
+   * not have without a type error. A sheet that promises a key nothing is bound to is the
+   * failure this shape exists to make impossible.
+   */
+  const shortcutHandlers = useMemo<Record<ShortcutId, () => void>>(
+    () => ({
+      'add-entity': handleAddEntity,
+      'add-relationship': handleAddRelationship,
+      delete: handleDeleteSelection,
+      copy: () => {
+        handleCopy()
+      },
+      cut: handleCut,
+      paste: handlePaste,
+      duplicate: handleDuplicate,
+      undo,
+      redo,
+      palette: () => {
+        openDialog('palette')
+      },
+      shortcuts: () => {
+        openDialog('shortcuts')
+      },
+      'clear-selection': () => {
+        selectEntities([])
+      },
+    }),
+    [
+      handleAddEntity,
+      handleAddRelationship,
+      handleDeleteSelection,
+      handleCopy,
+      handleCut,
+      handlePaste,
+      handleDuplicate,
+      undo,
+      redo,
+      openDialog,
+      selectEntities,
+    ],
+  )
+
   // NFR-3.2: every mouse action is reachable by keyboard.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -301,106 +349,25 @@ export function Editor(): React.ReactElement {
       if (activeDialog !== undefined) return
 
       /*
-       * Ctrl+K sits ABOVE the typing guard, and it is the only shortcut that does.
+       * One lookup, and the table decides everything the chain of `if`s used to.
        *
-       * The guard exists because the bare keys — `e`, `r`, `Delete` — are characters
-       * someone might be typing, and because Ctrl+Z inside a text field is the browser's
-       * undo rather than the document's. Neither applies here: Ctrl+K is a chord, so it
-       * cannot be typed by accident, and it has no native meaning to shadow. Leaving it
-       * below the guard would mean the palette could not be opened from the inspector or
-       * from the diagram-name field, which are two of the places someone is most likely to
-       * be when they want to jump somewhere else.
+       * It used to be eleven branches in this function, with Ctrl+K hoisted above the
+       * typing guard and the guard itself written out here. All three facts — which chord,
+       * whether it survives a text field, whether it swallows the key — now travel with
+       * the shortcut, which is also what the sheet renders. See `shortcuts.ts`.
        */
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        openDialog('palette')
-        return
-      }
+      const shortcut = findShortcut(event, isTypingTarget(event.target))
+      if (shortcut?.id === undefined) return
 
-      const target = event.target
-      const isTyping =
-        target instanceof HTMLElement &&
-        (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
-      if (isTyping) return
-
-      const modifier = event.ctrlKey || event.metaKey
-
-      if (modifier && event.key.toLowerCase() === 'z') {
-        event.preventDefault()
-        if (event.shiftKey) redo()
-        else undo()
-        return
-      }
-      if (modifier && event.key.toLowerCase() === 'y') {
-        event.preventDefault()
-        redo()
-        return
-      }
-      /*
-       * FR-7.4. These shadow the browser's own clipboard keys, which is safe here and only
-       * here: the typing guard above has already returned for anything focused in an input,
-       * a textarea or a contenteditable, so copying TEXT still works everywhere text is.
-       * On the canvas there is no text selection to serve, and Ctrl+D would otherwise open
-       * a bookmark dialog over the diagram.
-       */
-      if (modifier && event.key.toLowerCase() === 'c') {
-        event.preventDefault()
-        handleCopy()
-        return
-      }
-      if (modifier && event.key.toLowerCase() === 'x') {
-        event.preventDefault()
-        handleCut()
-        return
-      }
-      if (modifier && event.key.toLowerCase() === 'v') {
-        event.preventDefault()
-        handlePaste()
-        return
-      }
-      if (modifier && event.key.toLowerCase() === 'd') {
-        event.preventDefault()
-        handleDuplicate()
-        return
-      }
-      if (!modifier && event.key.toLowerCase() === 'e') {
-        event.preventDefault()
-        handleAddEntity()
-        return
-      }
-      if (!modifier && event.key.toLowerCase() === 'r') {
-        event.preventDefault()
-        handleAddRelationship()
-        return
-      }
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        event.preventDefault()
-        handleDeleteSelection()
-        return
-      }
-      if (event.key === 'Escape') {
-        selectEntities([])
-      }
+      if (shortcut.preventDefault !== false) event.preventDefault()
+      shortcutHandlers[shortcut.id]()
     }
 
     globalThis.addEventListener('keydown', onKeyDown)
     return () => {
       globalThis.removeEventListener('keydown', onKeyDown)
     }
-  }, [
-    activeDialog,
-    openDialog,
-    undo,
-    redo,
-    handleAddEntity,
-    handleAddRelationship,
-    handleDeleteSelection,
-    handleCopy,
-    handleCut,
-    handlePaste,
-    handleDuplicate,
-    selectEntities,
-  ])
+  }, [activeDialog, shortcutHandlers])
 
   const autoLayout = useAutoLayout({ diagram, lod: lodOverride ?? lod, execute })
 
@@ -417,34 +384,58 @@ export function Editor(): React.ReactElement {
    */
   const applyTheme = useApplyTheme()
   const { snapToGrid, setSnapToGrid } = useSnapToGrid()
+
+  /**
+   * The key hint beside a palette command, taken from the keymap rather than retyped.
+   *
+   * These used to be string literals — `'E'`, `'Ctrl+Shift+Z'` — sitting next to a
+   * keydown handler that tested for the real thing a hundred lines away. Nothing would
+   * have failed if the two had disagreed; the palette would simply have taught the wrong
+   * key. Now both come off the same `Chord`.
+   */
+  const mac = useMemo(() => isMacPlatform(), [])
+  const hintFor = useCallback(
+    (id: ShortcutId): string | undefined => {
+      const chord = EDITOR_SHORTCUTS.find((candidate) => candidate.id === id)?.chords[0]
+      return chord === undefined ? undefined : formatChord(chord, { mac })
+    },
+    [mac],
+  )
+
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
-      { id: 'add-entity', label: 'Add entity', hint: 'E', disabled: false, run: handleAddEntity },
+      {
+        id: 'add-entity',
+        label: 'Add entity',
+        hint: hintFor('add-entity'),
+        disabled: false,
+        run: handleAddEntity,
+      },
       {
         id: 'add-relationship',
         label: 'Add relationship',
-        hint: 'R',
+        hint: hintFor('add-relationship'),
         disabled: selectedEntityIds.size !== 2,
         run: handleAddRelationship,
       },
       {
         id: 'delete',
         label: 'Delete selection',
-        hint: 'Del',
+        hint: hintFor('delete'),
         disabled: selectedEntityIds.size + selectedRelationshipIds.size === 0,
         run: handleDeleteSelection,
       },
       {
         id: 'undo',
         label: history.undoLabel === undefined ? 'Undo' : `Undo ${history.undoLabel}`,
-        hint: 'Ctrl+Z',
+        hint: hintFor('undo'),
         disabled: !history.canUndo,
         run: undo,
       },
       {
         id: 'redo',
         label: history.redoLabel === undefined ? 'Redo' : `Redo ${history.redoLabel}`,
-        hint: 'Ctrl+Shift+Z',
+        hint: hintFor('redo'),
         disabled: !history.canRedo,
         run: redo,
       },
@@ -485,6 +476,15 @@ export function Editor(): React.ReactElement {
         },
       },
       {
+        id: 'shortcuts',
+        label: 'Keyboard shortcuts',
+        hint: hintFor('shortcuts'),
+        disabled: false,
+        run: () => {
+          openDialog('shortcuts')
+        },
+      },
+      {
         id: 'issues',
         label: validationPanelOpen ? 'Hide issues' : 'Show issues',
         hint: undefined,
@@ -513,6 +513,7 @@ export function Editor(): React.ReactElement {
       })),
     ],
     [
+      hintFor,
       handleAddEntity,
       handleAddRelationship,
       handleDeleteSelection,
@@ -591,6 +592,9 @@ export function Editor(): React.ReactElement {
         diagramMenu={diagramMenu}
         validationToggle={<ValidationToggle />}
         snapToggle={<SnapToggle />}
+        onShowShortcuts={() => {
+          openDialog('shortcuts')
+        }}
         onExport={() => {
           openDialog('export')
         }}
@@ -662,6 +666,8 @@ export function Editor(): React.ReactElement {
       {activeDialog === 'palette' ? (
         <CommandPalette diagram={diagram} commands={paletteCommands} onClose={closeDialog} />
       ) : null}
+
+      {activeDialog === 'shortcuts' ? <ShortcutsDialog onClose={closeDialog} /> : null}
 
       {activeDialog === 'export' ? <ExportDialog diagram={diagram} onClose={closeDialog} /> : null}
 

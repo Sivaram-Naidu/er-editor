@@ -262,8 +262,8 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 
 | ID     | Priority | Requirement                                                                                             | Status                       |
 | ------ | -------- | ------------------------------------------------------------------------------------------------------- | ---------------------------- |
-| FR-9.1 | P0       | Keyboard shortcut reference accessible via `?`.                                                         | Open                         |
-| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    | **Done** — every toolbar command, including all four Detail levels and all three themes |
+| FR-9.1 | P0       | Keyboard shortcut reference accessible via `?`.                                                         | **Done** — and it is not a second list: `features/editor/shortcuts.ts` IS the keymap, the window handler dispatches from it, the sheet renders it and the palette's hints are formatted from the same `Chord` objects. The sheet therefore cannot print a key the keymap does not test for |
+| FR-9.2 | P0       | A command palette (`Ctrl+K`) exposing every command and doubling as the search entry point (FR-2.6).    | **Partial** — every TOOLBAR command, including all four Detail levels and all three themes. Not every command: copy, cut, paste and duplicate (FR-7.4) have keyboard bindings and no palette entry, which the FR-9.1 sheet made visible by listing all four. See NEXT.md |
 | FR-9.3 | P1       | Light and dark themes, following system preference by default.                                          | Done                         |
 | FR-9.4 | P1       | An onboarding sample schema loadable in one click, plus an empty-state canvas with clear first actions. | Done                         |
 | FR-9.5 | P2       | Installable as a PWA with full offline capability.                                                      | Open (V2)                    |
@@ -832,8 +832,7 @@ rows below that had to be corrected on 10 Sep 2026 are what happens when that sl
    exist; the edges ignore them. Needs a fallback for L0 and L1, where those handles are
    not rendered.
 5. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
-   tested, only unwired); expanding one entity from the "N more" row; a keyboard shortcut
-   sheet (FR-9.1).
+   tested, only unwired); expanding one entity from the "N more" row.
 6. DBML export (FR-6.7) — one directory plus one line in `src/io/registry.ts`.
 
 Deferred to V2 with slots reserved in the IR: n-ary relationships, ISA hierarchies,

@@ -42,6 +42,13 @@ export interface ToolbarProps {
    * owns a preference, and the toolbar has no business knowing that preferences persist.
    */
   snapToggle: React.ReactNode
+  /**
+   * Opens the shortcut reference (FR-9.1).
+   *
+   * A visible button as well as the `?` key, because a reference that can only be reached
+   * by a shortcut is only useful to someone who already knows the shortcuts.
+   */
+  onShowShortcuts: () => void
   isLayingOut: boolean
   layoutError: string | undefined
 }
@@ -163,7 +170,20 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
         <ThemeToggle />
       </div>
 
-      <div className="erd-toolbar__group">{props.validationToggle}</div>
+      <div className="erd-toolbar__group">
+        {props.validationToggle}
+        <button
+          type="button"
+          className="erd-btn"
+          onClick={props.onShowShortcuts}
+          /* The glyph is the label a user recognises; the accessible name is the sentence
+             a screen reader needs, because "?" read aloud is nothing (NFR-4.4). */
+          aria-label="Keyboard shortcuts"
+          title="Keyboard shortcuts (?)"
+        >
+          ?
+        </button>
+      </div>
 
       <div className="erd-toolbar__group erd-toolbar__group--end">
         <span className="erd-status">

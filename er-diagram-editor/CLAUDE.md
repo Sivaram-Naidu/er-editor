@@ -88,6 +88,17 @@ model. Referential integrity is the exception and IS enforced, because a danglin
 reference makes a document unloadable. Modelling-quality checks belong in
 `domain/validation/`.
 
+**Keyboard shortcuts are declared once, in `features/editor/shortcuts.ts`.** That table IS
+the keymap: the window handler dispatches from it, the `?` sheet renders it, and the Ctrl+K
+palette formats its hints from the same `Chord` objects. A hand-written row in the sheet is
+a second description of behaviour, and the failure is silent — the reference teaches a key
+nothing is bound to. `ShortcutId` plus a `Record<ShortcutId, () => void>` in `Editor.tsx`
+makes the id side a type error; the one thing types cannot see, two entries claiming the
+same chord, has a test. Two details are easy to get wrong and both are load-bearing:
+`Ctrl+Z` declares `shift: false` or `Ctrl+Shift+Z` matches it first and redo is unreachable,
+and `?` must leave `shift` unconstrained, because the CHARACTER already encodes Shift and
+does so differently across layouts.
+
 **Attributes are keyed by stable id, never by name.** Renaming a column must not break the
 foreign key referencing it.
 

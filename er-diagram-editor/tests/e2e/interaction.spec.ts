@@ -665,3 +665,79 @@ test('snap to grid rounds the drop to the grid, and says whether it is on (FR-3.
   expect(moved.y % 16, `y landed at ${String(moved.y)}, which is off the grid`).toBe(0)
   expect(moved.x, 'the box did not move at all').not.toBe(320)
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// THE KEYBOARD SHORTCUT SHEET (FR-9.1)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The unit suite already asserts that the sheet renders every entry in the table. What it
+// cannot assert is that the table is TRUE — that a key the sheet teaches actually does
+// something when a person presses it in a browser. A reference is worth less than nothing
+// if it is confidently wrong, so these press what the sheet says.
+
+/** The chords printed on one row of the sheet, found by the row's description. */
+async function keysFor(page: Page, label: string): Promise<string[]> {
+  return page
+    .locator('.erd-shortcuts__row')
+    .filter({ hasText: label })
+    .locator('kbd')
+    .allTextContents()
+}
+
+test('? opens the shortcut sheet, and the keys it teaches are the ones that work', async ({
+  page,
+}) => {
+  await openSample(page)
+
+  await page.keyboard.press('?')
+  const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' })
+  await expect(sheet).toBeVisible()
+
+  // Redo carries an alias that nothing exercised before this spec: Ctrl+Y sat in the
+  // keymap, uncovered, and the palette's hint said only Ctrl+Shift+Z.
+  expect(await keysFor(page, 'Redo')).toEqual(['Ctrl+Shift+Z', 'Ctrl+Y'])
+  expect(await keysFor(page, 'Delete the selection')).toEqual(['Del', 'Backspace'])
+
+  await page.keyboard.press('Escape')
+  await expect(sheet).toBeHidden()
+
+  // Now press what it just promised. `E` then Ctrl+Z then each redo key in turn.
+  const boxes = page.locator('.react-flow__node')
+  await expect(boxes).toHaveCount(4)
+
+  await page.keyboard.press('e')
+  await expect(boxes).toHaveCount(5)
+  await page.keyboard.press('Control+z')
+  await expect(boxes).toHaveCount(4)
+  await page.keyboard.press('Control+Shift+z')
+  await expect(boxes, 'Ctrl+Shift+Z is on the sheet but does not redo').toHaveCount(5)
+  await page.keyboard.press('Control+z')
+  await page.keyboard.press('Control+y')
+  await expect(boxes, 'Ctrl+Y is on the sheet but does not redo').toHaveCount(5)
+})
+
+test('the sheet is reachable without knowing a shortcut (FR-9.1)', async ({ page }) => {
+  // A reference that can only be opened by a shortcut is only useful to someone who
+  // already knows the shortcuts.
+  await openSample(page)
+
+  await page.getByRole('button', { name: 'Keyboard shortcuts' }).click()
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
+})
+
+test('? typed into a field types a question mark (FR-9.1)', async ({ page }) => {
+  /*
+   * The typing guard, in the one place it can actually fail. `?` is a character before it
+   * is a shortcut, and a sheet that springs open over a half-typed table name — swallowing
+   * the keystroke on the way — is worse than no `?` binding at all.
+   */
+  await openSample(page)
+  await coldClick(page, entity(page, 'CUSTOMER'))
+
+  const nameField = page.locator('.erd-inspector input').first()
+  await nameField.click()
+  await nameField.press('?')
+
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0)
+  await expect(nameField).toHaveValue('CUSTOMER?')
+})

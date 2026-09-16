@@ -331,6 +331,31 @@ visible. Guides use a **new token, `--erd-guide`**, rather than `--erd-signal`: 
 drawn while the box is selected and therefore already outlined in signal blue, so the same
 blue is invisible at exactly the moment it is meant to confirm something.
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — shortcut sheet session)
+
+FR-9.1, the first entry in Tier 3. The point of the item was never the dialog; it was not
+ending up with a second list.
+
+| Thing                                                    | Evidence                                                                                                                                                                                                                                       |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `?` opens it                                              | Sheet on screen with **13 rows in 4 groups**, read out of the DOM. Escape closes it and the document behind is untouched (still 4 boxes).                                                                                                      |
+| **The keys it teaches are the keys that work**             | The e2e reads the redo row off the sheet — `Ctrl+Shift+Z` or `Ctrl+Y` — then presses both. `Ctrl+Y` had **no test anywhere** before this: it sat in the keymap and the palette's hint said only `Ctrl+Shift+Z`. Dropping the alias fails the spec by name. |
+| The sheet cannot drift from the keymap                    | One table. The window handler dispatches from it, the sheet renders it, the palette formats its hints from it. Mutating the sheet to show only each command's first chord fails the unit pair test; adding an id without a handler is a **type** error.  |
+| Reachable without knowing a shortcut                      | A `?` button in the toolbar beside Issues, `aria-label="Keyboard shortcuts"`.                                                                                                                                                                  |
+| `?` typed into a field types a question mark              | Inspector name field reads `CUSTOMER?` and no dialog opened. Mutating `shortcuts` to `whileTyping: true` fails the spec.                                                                                                                       |
+| The arrow-key row tells the truth                         | Checked rather than assumed: clicking `PRODUCT` and pressing Right moved it **640 → 645px**, with no Tab. The first draft of the label said "Tab to it first" and was wrong; it now says "Nudge the selected table".                            |
+| Light, dark and narrow                                    | `<kbd>` styled from tokens, so the dark panel is correct without a second rule. At a 520px viewport the two columns collapse to one and the page does not scroll horizontally.                                                                 |
+| The gate                                                  | `pnpm verify` green: 844 unit tests in 40 files, 31 e2e specs. Coverage 93.0 / 84.2 / 94.2, up on all three again.                                                                                                                              |
+
+Worth not re-deriving: the keymap used to be eleven `if`s in `Editor.tsx` with `Ctrl+K`
+hoisted above a hand-written typing guard. All three facts a chord carries — which keys,
+whether it survives a text field, whether it swallows the key — now travel with the
+shortcut. Two of them were invisible before: `Ctrl+Z` needs `shift: false` or
+`Ctrl+Shift+Z` matches it first and redo becomes unreachable, and `?` must NOT constrain
+shift, because the character already encodes it and does so differently across layouts.
+Both have tests. **`Escape` deliberately does not `preventDefault`** — clearing the
+selection is not a claim on the key.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -408,9 +433,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 819 unit tests in 38 files, ~50s. Coverage 92.9% statements / 83.9% branches / 94.1%
+- 844 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
   lines against an 80% gate.
-- **28 e2e specs in 3 files, ~60s, all passing.** No `test.fail()` markers left. `pnpm
+- **31 e2e specs in 3 files, ~65s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -418,7 +443,7 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
   assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
   and says why.
-- Bundle 741 kB raw, 232 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
+- Bundle 744 kB raw, 233 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
   stale by ~18 kB: measured against the commit before FR-3.5 the figure was already
   737/231, and snapping added 4 kB raw / 1.3 kB gzipped. Re-measure the PREVIOUS COMMIT
   before attributing a bundle change to your own work.) Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
@@ -426,6 +451,8 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
+- 13 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — one of which
+  (the arrow keys) is documented rather than bound, and says so.
 - 2 user preferences persisted outside the document: theme (FR-9.3) and snap-to-grid
   (FR-3.5). Both write through a hook rather than from the control, so the toolbar and the
   Ctrl+K palette cannot set one and forget the other.
@@ -562,9 +589,21 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. Keyboard shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
-   `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
-   "N more" row.
+1. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
+   tested, only unwired); expanding one entity from the "N more" row.
+2. **The palette is missing four commands it claims to have (FR-9.2).** Found while
+   building the shortcut sheet, not before: the sheet lists copy, cut, paste and duplicate
+   because the keymap binds them, and the Ctrl+K palette offers none of the four. FR-9.2's
+   wording is "every command", so its SRS row has been corrected from Done to Partial
+   rather than the gap being left to be rediscovered. The fix is four entries in
+   `paletteCommands` in `Editor.tsx`, next to the handlers that already exist — small, but
+   it is a different feature from this one and was not folded into it.
+
+**The keyboard shortcut sheet (FR-9.1) came off this list on 16 Sep 2026** — see the
+browser table above. What is worth not re-opening is the shape rather than the dialog:
+`features/editor/shortcuts.ts` is the keymap, and the sheet is a rendering of it. If a
+later change needs a shortcut the sheet should not show, add a field to `Shortcut` for
+that; do not start writing rows by hand.
 
 **Snap-to-grid and alignment guides (FR-3.5) came off this list on 16 Sep 2026** — see the
 browser table above. The design decision worth not re-opening: the two halves are NOT one

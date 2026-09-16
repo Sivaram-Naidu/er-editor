@@ -339,6 +339,75 @@ body {
   font-size: var(--erd-text-lg);
 }
 
+/* ── Keyboard shortcut sheet (FR-9.1) ────────────────────────────────────── */
+
+.erd-shortcuts {
+  display: grid;
+  /* Two columns where there is room, one when there is not. `auto-fit` rather than a
+     media query, because the panel's width is `min(720px, 100%)` and so is a function of
+     the viewport rather than of a breakpoint. */
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--erd-space-4);
+}
+
+.erd-shortcuts__heading {
+  margin: 0 0 var(--erd-space-2);
+  font-size: var(--erd-text-sm);
+  font-weight: 600;
+  color: var(--erd-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.erd-shortcuts__list {
+  margin: 0;
+  display: grid;
+  gap: var(--erd-space-1);
+}
+
+/* The keys column is sized to its widest entry rather than fixed, so `Ctrl+Shift+Z` does
+   not wrap and `E` does not sit in a chasm of its own. */
+.erd-shortcuts__row {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  align-items: baseline;
+  gap: var(--erd-space-3);
+}
+
+.erd-shortcuts__keys {
+  margin: 0;
+  white-space: nowrap;
+}
+
+.erd-shortcuts__label {
+  margin: 0;
+  font-size: var(--erd-text-sm);
+  color: var(--erd-ink);
+}
+
+.erd-shortcuts__or {
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+}
+
+.erd-shortcuts kbd {
+  display: inline-block;
+  padding: 1px var(--erd-space-2);
+  font-family: var(--erd-font-ui);
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink);
+  background: var(--erd-node-header);
+  border: 1px solid var(--erd-rule);
+  border-bottom-width: 2px;
+  border-radius: var(--erd-radius);
+}
+
+.erd-shortcuts__note {
+  margin: 0;
+  font-size: var(--erd-text-xs);
+  color: var(--erd-ink-faint);
+}
+
 /* ── Export ──────────────────────────────────────────────────────────────── */
 
 /*
