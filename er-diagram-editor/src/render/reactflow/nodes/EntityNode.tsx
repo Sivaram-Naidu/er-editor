@@ -31,6 +31,15 @@ export interface EntityNodeData extends Record<string, unknown> {
    * exactly when the user most needs to be told the box needs attention.
    */
   issueSeverity: Severity | undefined
+  /**
+   * How many neighbouring tables isolate mode is not showing (FR-2.8).
+   *
+   * `undefined` when none are — which is every box whenever isolate is off, and most of
+   * them when it is on. A number rather than a list because the box has room for a count
+   * and not for names, and because a primitive keeps `sameEntityNode` a comparison rather
+   * than a walk.
+   */
+  hiddenNeighbours: number | undefined
 }
 
 /**
@@ -67,6 +76,7 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
     foreignKeyTargets,
     editable,
     issueSeverity,
+    hiddenNeighbours,
   } = data as unknown as EntityNodeData
   const actions = useEditorActions()
 
@@ -116,6 +126,25 @@ function EntityNodeComponent({ data }: NodeProps): React.ReactElement {
           <span className="erd-node__issue" data-severity={issueSeverity} title={marker.label}>
             <span aria-hidden="true">{marker.glyph}</span>
             <span className="erd-visually-hidden">{marker.label}</span>
+          </span>
+        )}
+
+        {/* The honesty badge for isolate mode (FR-2.8).
+            Hiding distant tables makes a box at the edge of the view LOOK like it has
+            fewer relationships than it has, which in a modelling tool is a lie about the
+            schema rather than a cosmetic loss. This says how many are beyond the edge. */}
+        {hiddenNeighbours === undefined || hiddenNeighbours === 0 ? null : (
+          <span
+            className="erd-node__beyond"
+            title={`${String(hiddenNeighbours)} connected ${
+              hiddenNeighbours === 1 ? 'table is' : 'tables are'
+            } outside the isolated view`}
+          >
+            <span aria-hidden="true">+{hiddenNeighbours}</span>
+            <span className="erd-visually-hidden">
+              {hiddenNeighbours} connected {hiddenNeighbours === 1 ? 'table' : 'tables'} hidden by
+              isolate mode
+            </span>
           </span>
         )}
       </header>

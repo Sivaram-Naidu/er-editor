@@ -22,6 +22,7 @@ import {
   type AttributeId,
   type Diagram,
   type EntityId,
+  type Isolation,
   type Point,
   type RelationshipId,
   type Severity,
@@ -119,6 +120,15 @@ export interface CanvasProps {
    * rasterising.
    */
   onNodesMeasured?: () => void
+  /**
+   * Isolate mode: draw only these entities, and say what each is hiding (FR-2.8).
+   *
+   * Omitted means draw everything, which is what makes this a VIEW filter rather than a
+   * document one. The diagram in the store is never narrowed — export, validation and
+   * auto-layout all keep seeing the whole schema, which is the only sane answer for a
+   * focus mode you can turn on and off.
+   */
+  isolation?: Isolation | undefined
   showMinimap: boolean
   /**
    * Worst validation severity per element, for the inline markers of FR-8.4.
@@ -348,8 +358,20 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     return targets
   }, [diagram.entities])
 
+  const isolation = props.isolation
+
   const baseNodes = useMemo<Node<EntityNodeData>[]>(() => {
-    return diagram.entities.map((entity, index) => ({
+    /* The index is kept over the WHOLE entity list, not the filtered one, so a box keeps
+       its fallback grid slot when isolate is turned on and off. Renumbering the survivors
+       would move every unplaced entity the moment you focused on one. */
+    const visible =
+      isolation === undefined
+        ? diagram.entities.map((entity, index) => [entity, index] as const)
+        : diagram.entities
+            .map((entity, index) => [entity, index] as const)
+            .filter(([entity]) => isolation.entityIds.has(entity.id))
+
+    return visible.map(([entity, index]) => ({
       id: entity.id,
       type: 'entity',
       position: diagram.layout.positions[entity.id] ?? fallbackPosition(index),
@@ -367,6 +389,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         foreignKeyTargets,
         editable: props.editable,
         issueSeverity: issueSeverityByEntity.get(entity.id),
+        hiddenNeighbours: isolation?.hiddenNeighbours.get(entity.id),
       },
     }))
   }, [
@@ -376,6 +399,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     tracedAttributesByEntity,
     foreignKeyTargets,
     banded,
+    isolation,
     props.selectedEntityIds,
     props.selectedAttributeId,
     props.editable,
@@ -450,6 +474,17 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     return diagram.relationships.flatMap((relationship) => {
       const [from, to] = relationship.participants
       if (from === undefined || to === undefined) return []
+      /* Only the connectors with both ends on the canvas.
+       *
+       * NOT because leaving them in draws a line to nowhere — it does not. React Flow
+       * skips any edge whose source or target is missing from `nodeLookup`, silently:
+       * checked at 1 hop from ORDER with this line removed, and the rendered edge count,
+       * the console and the warnings were byte-for-byte the same. So this is about what
+       * gets BUILT rather than what gets drawn. Without it the memo mints an object for
+       * every relationship in the document on every render — at the 300-entity ceiling
+       * that is several hundred objects thrown away to draw two — and the view's own
+       * definition of its edges lives somewhere the renderer can see it. */
+      if (isolation !== undefined && !isolation.relationshipIds.has(relationship.id)) return []
 
       return [
         {
@@ -468,7 +503,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         },
       ]
     })
-  }, [diagram, traced, props.selectedRelationshipIds, issueSeverityByRelationship])
+  }, [diagram, traced, isolation, props.selectedRelationshipIds, issueSeverityByRelationship])
 
   /** Handle ids are `<attributeId>-source` / `-target`; box handles have no id. */
   const attributeIdFromHandle = (handle: string | null | undefined): AttributeId | undefined => {

@@ -84,6 +84,23 @@
  * Deliberately NOT a border or fill change on the node. The traced-path highlight
  * already owns the border and the elevation (FR-4.1), and a second treatment competing
  * for the same channel would make a hovered-and-invalid table unreadable. */
+/* "+3" on a box at the edge of an isolated view (FR-2.8).
+ *
+ * Deliberately quiet — a rule-coloured outline rather than a filled badge — because it is
+ * not a problem with the model, it is a statement about the VIEW. The issue markers above
+ * are the only filled badges on a box, and they should stay that way or a focused view
+ * looks like a diagram full of warnings. */
+.erd-node__beyond {
+  flex-shrink: 0;
+  padding: 0 0.35em;
+  border: 1px dashed var(--erd-rule-strong);
+  border-radius: 999px;
+  font-size: var(--erd-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  color: var(--erd-ink-muted);
+}
+
 .erd-node__issue {
   flex-shrink: 0;
   width: 1.15em;

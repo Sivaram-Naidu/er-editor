@@ -893,3 +893,102 @@ test('dragging one of a marquee selection moves all of it, as one undo step (FR-
     'Undo Move entities',
   )
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISOLATE MODE (FR-2.8)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The sample is a chain: CUSTOMER — ORDER — ORDER_LINE — PRODUCT. One hop from ORDER is
+// therefore three boxes and two connectors, and the fourth is what tests the parts that
+// are easy to get wrong: the edge that would otherwise point at a node that is not there,
+// and the badge that stops the view lying about the boxes at its edge.
+
+test('isolate draws only the neighbourhood, and says what it is hiding (FR-2.8)', async ({
+  page,
+}) => {
+  await openSample(page)
+  await coldClick(page, entity(page, 'ORDER'))
+
+  await page.getByLabel('Isolate').selectOption('1')
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(3)
+  await expect(entity(page, 'PRODUCT')).toHaveCount(0)
+  // Two connectors, not three: `appears in` leads to PRODUCT, which is not on the canvas.
+  // This asserts the VIEW, not the edge filter in `Canvas.tsx` — React Flow drops an edge
+  // with a missing endpoint on its own, so removing that filter leaves this passing. What
+  // the filter saves is building the objects, which no browser assertion can see.
+  await expect(page.locator('.react-flow__edge')).toHaveCount(2)
+  await expect(page.getByText('3 of 4 entities')).toBeVisible()
+
+  // ORDER_LINE sits at the edge of the view and still connects to PRODUCT. Without this
+  // it would read as a leaf, which is a false statement about the schema rather than a
+  // cosmetic loss.
+  const badge = entity(page, 'ORDER_LINE').locator('.erd-node__beyond')
+  await expect(badge).toHaveText(/\+1/)
+  await expect(entity(page, 'ORDER').locator('.erd-node__beyond')).toHaveCount(0)
+
+  await page.getByLabel('Isolate').selectOption('2')
+  await expect(page.locator('.react-flow__node')).toHaveCount(4)
+  await expect(page.locator('.erd-node__beyond')).toHaveCount(0)
+})
+
+test('isolate with nothing selected shows everything, not nothing (FR-2.8)', async ({ page }) => {
+  /*
+   * The literal reading of "hide everything more than N hops from the selection" with an
+   * empty selection is a blank canvas. That is not a useful answer to having pressed
+   * Escape, so the mode goes idle instead and the status line says why.
+   */
+  await openSample(page)
+
+  await page.getByLabel('Isolate').selectOption('1')
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(4)
+  await expect(page.getByText('select a table to isolate')).toBeVisible()
+})
+
+test('clearing the selection brings the whole diagram back (FR-2.8)', async ({ page }) => {
+  await openSample(page)
+  await coldClick(page, entity(page, 'CUSTOMER'))
+  await page.getByLabel('Isolate').selectOption('1')
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+
+  await page.keyboard.press('Escape')
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(4)
+})
+
+test('a table hidden by isolate is clickable the moment it comes back (FR-2.8)', async ({
+  page,
+}) => {
+  /*
+   * The click-to-select family, which this project has shipped once already: a node
+   * returning to the array without the size React Flow measured renders
+   * `visibility: hidden` for a frame, and a press inside that window lands on the pane and
+   * CLEARS the selection instead of making one. Isolate removes nodes and puts them back,
+   * so it is exactly the shape that provokes it — hence a cold press with no dwell.
+   */
+  await openSample(page)
+  await coldClick(page, entity(page, 'CUSTOMER'))
+  await page.getByLabel('Isolate').selectOption('1')
+  await expect(entity(page, 'PRODUCT')).toHaveCount(0)
+
+  await page.getByLabel('Isolate').selectOption('off')
+  await expect(entity(page, 'PRODUCT')).toHaveCount(1)
+
+  await coldClick(page, entity(page, 'PRODUCT'))
+
+  expect(await selectedIds(page)).toHaveLength(1)
+  await expect(page.getByText('PRODUCT', { exact: true }).first()).toBeVisible()
+})
+
+test('isolate is a view, not an edit (FR-2.8)', async ({ page }) => {
+  // Nothing about it may reach the document: no command, no undo entry, and the entity
+  // count the toolbar reports is still the whole schema's.
+  await openSample(page)
+  await coldClick(page, entity(page, 'CUSTOMER'))
+  await page.getByLabel('Isolate').selectOption('1')
+
+  await expect(page.locator('.react-flow__node')).toHaveCount(2)
+  await expect(page.getByText('2 of 4 entities')).toBeVisible()
+  await expect(page.getByRole('button', { name: /^Undo$/ })).toBeDisabled()
+})

@@ -197,6 +197,15 @@ culling off.
     five and looks almost right. Accumulate.
   - **`selectionMode` defaults to `Full`**, which asks the band to contain a box entirely.
     At 200px-wide tables a band drawn across a row of them selects nothing. `Partial`.
+- **React Flow SILENTLY skips an edge whose source or target is not in `nodeLookup`.** No
+  console error, no warning, no throw — checked by removing the edge filter that isolate
+  mode (FR-2.8) applies and comparing the rendered edge count, the console and the warnings
+  with it in place. Two consequences, in opposite directions: handing it a partial node
+  list is safe, so a view that hides nodes does not have to hide their edges to avoid a
+  line to nowhere; and a filter that exists to prevent one is guarding nothing, so do not
+  write a test claiming it does. The filter in `Canvas.tsx` is kept for what it saves in
+  edge objects BUILT — at the 300-entity ceiling, several hundred thrown away to draw two —
+  and its comment says exactly that.
 - **A marquee leaves a pointer-events DEAD ZONE behind it.** React Flow follows one by
   rendering `.react-flow__nodesselection-rect` around the bounding box of the selection, as
   a handle for dragging the group, and it is `pointer-events: all` over its whole area.

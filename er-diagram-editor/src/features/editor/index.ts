@@ -11,6 +11,7 @@ export { useAppliedTheme } from './useAppliedTheme'
 export { ThemeToggle } from './ThemeToggle'
 export { ShortcutsDialog, type ShortcutsDialogProps } from './ShortcutsDialog'
 export { SnapToggle } from './SnapToggle'
+export { ISOLATE_DEPTHS, isolateLabel } from './isolateOptions'
 export {
   EDITOR_SHORTCUTS,
   SHORTCUT_GROUPS,

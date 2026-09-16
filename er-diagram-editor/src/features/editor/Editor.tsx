@@ -8,6 +8,7 @@ import {
   addRelationship,
   applyMerge,
   copyEntities,
+  isolate,
   PASTE_OFFSET,
   pasteEntities,
   planPaste,
@@ -53,6 +54,7 @@ import { useAutoLayout } from './useAutoLayout'
 import { ShortcutsDialog } from './ShortcutsDialog'
 import { SnapToggle } from './SnapToggle'
 import { Toolbar } from './Toolbar'
+import { ISOLATE_DEPTHS, isolateLabel } from './isolateOptions'
 import { EDITOR_SHORTCUTS, findShortcut, isTypingTarget, type ShortcutId } from './shortcuts'
 import { useSnapToGrid } from './useSnapToGrid'
 import { buildSampleDiagram } from './sample'
@@ -100,6 +102,9 @@ export function Editor(): React.ReactElement {
   const copyToClipboard = useClipboardStore((state) => state.copy)
   const notePasted = useClipboardStore((state) => state.notePasted)
 
+  const isolateDepth = useViewportStore((state) => state.isolateDepth)
+  const setIsolateDepth = useViewportStore((state) => state.setIsolateDepth)
+  const revealEntities = useViewportStore((state) => state.revealEntities)
   const lod = useViewportStore((state) => state.lod)
   const lodOverride = useViewportStore((state) => state.lodOverride)
   const setLodOverride = useViewportStore((state) => state.setLodOverride)
@@ -225,6 +230,43 @@ export function Editor(): React.ReactElement {
     execute(pasteEntities(result, 'Duplicate'))
     selectEntities([...result.newEntityIds])
   }, [diagram, selectedEntityIds, execute, selectEntities])
+
+  /**
+   * What the canvas may draw, when isolate mode is on (FR-2.8).
+   *
+   * `undefined` — draw everything — whenever the mode is off OR nothing is selected, and
+   * the second half is the design decision. Isolate is defined relative to a selection, so
+   * with nothing selected there is no centre for it; showing NOTHING would be the literal
+   * reading and is a blank canvas, which is not a useful answer to having pressed Escape.
+   * The toolbar says so rather than the canvas going empty.
+   *
+   * This is a VIEW, not an edit. The document in the store is untouched, so export,
+   * validation, auto-layout and the file the user saves all still see the whole schema.
+   */
+  const isolation = useMemo(() => {
+    if (isolateDepth === undefined || selectedEntityIds.size === 0) return undefined
+    return isolate(diagram, [...selectedEntityIds], isolateDepth)
+  }, [diagram, selectedEntityIds, isolateDepth])
+
+  /**
+   * Turn isolate on or off, and frame what is left.
+   *
+   * The camera move is done HERE, in the event handler, rather than in an effect watching
+   * `isolation`. An effect would also fire every time the selection changed while the mode
+   * was on, re-framing the canvas under someone who was only clicking about — and writing
+   * to a store from an effect is the cascading-render shape CLAUDE.md records twice.
+   *
+   * It recomputes the isolation because the memo above is still on the OLD depth at this
+   * point; the walk is a BFS over an in-memory index and happens once per click.
+   */
+  const handleSetIsolateDepth = useCallback(
+    (depth: number | undefined) => {
+      setIsolateDepth(depth)
+      if (depth === undefined || selectedEntityIds.size === 0) return
+      revealEntities([...isolate(diagram, [...selectedEntityIds], depth).entityIds])
+    },
+    [setIsolateDepth, revealEntities, diagram, selectedEntityIds],
+  )
 
   const handleMove = useCallback(
     (positions: Record<EntityId, Point>) => {
@@ -466,6 +508,16 @@ export function Editor(): React.ReactElement {
           openDialog('export')
         },
       },
+      ...[undefined, ...ISOLATE_DEPTHS].map((depth) => ({
+        id: `isolate-${String(depth ?? 'off')}`,
+        label: `Isolate: ${isolateLabel(depth)}`,
+        hint: undefined,
+        // "Off" is always available — it is the way out. The depths need a centre.
+        disabled: isolateDepth === depth || (depth !== undefined && selectedEntityIds.size === 0),
+        run: () => {
+          handleSetIsolateDepth(depth)
+        },
+      })),
       {
         id: 'snap-to-grid',
         label: snapToGrid ? 'Snap to grid: off' : 'Snap to grid: on',
@@ -530,6 +582,8 @@ export function Editor(): React.ReactElement {
       openDialog,
       validationPanelOpen,
       toggleValidationPanel,
+      isolateDepth,
+      handleSetIsolateDepth,
       snapToGrid,
       setSnapToGrid,
       lodOverride,
@@ -589,6 +643,9 @@ export function Editor(): React.ReactElement {
         onUndo={undo}
         onRedo={redo}
         onSetLodOverride={setLodOverride}
+        isolateDepth={isolateDepth}
+        isolatedCount={isolation?.entityIds.size}
+        onSetIsolateDepth={handleSetIsolateDepth}
         diagramMenu={diagramMenu}
         validationToggle={<ValidationToggle />}
         snapToggle={<SnapToggle />}
@@ -640,6 +697,7 @@ export function Editor(): React.ReactElement {
                   onViewportChange={setViewport}
                   onPaneResize={setPaneSize}
                   snapToGrid={snapToGrid}
+                  isolation={isolation}
                   showMinimap={minimapOpen}
                   issueSeverityByEntity={validation.severityByEntity}
                   issueSeverityByRelationship={validation.severityByRelationship}

@@ -382,6 +382,32 @@ the handle in the MARQUEE's own pointer-up and nowhere else — so a shift-click
 has one. It builds the selection with a band now. Mutate the fix and re-run the guard;
 this is the third time that rule has earned its place.
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — isolate session)
+
+FR-2.8, the first entry in Tier 3. The traversal was already written and tested; what this
+added was the answer to "hidden or heavily dimmed" and the things that only show up once a
+focus mode actually removes boxes.
+
+| Thing                                                    | Evidence                                                                                                                                                                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hidden, not dimmed                                        | ORDER at 1 hop draws **3 of 4** boxes and 2 of 3 connectors; at 2 hops, 4 and 3. Dimming was rejected because it already means "off the traced path" (FR-4.1) and saves nothing at a hundred tables — the reason to isolate there is that there is too much drawn. |
+| **The view does not lie about the schema**                | ORDER_LINE sits at the edge at 1 hop and still connects to PRODUCT, so it carries a quiet dashed `+1`. Without it a boundary box reads as a leaf, which in a modelling tool is a false statement rather than a cosmetic loss. Screenshot, and asserted. |
+| It counts TABLES, not connectors                           | Two relationships to the same hidden table is `+1`. Unit-tested, because `+2` would overstate exactly the thing the badge exists to be honest about.                                                                                               |
+| Nothing selected is not a blank canvas                     | Arming isolate with an empty selection leaves all 4 boxes and the status reads "select a table to isolate". Mutated to take the literal reading and the canvas went to **0 boxes** — the spec fails by name.                                       |
+| Escape brings everything back                              | Selection cleared → 4 boxes, no command run.                                                                                                                                                                                                       |
+| **A hidden box is clickable the instant it returns**       | The click-to-select family, checked rather than assumed: isolate away PRODUCT, turn isolate off, press it cold with no dwell. `elementFromPoint` returns PRODUCT and the press selects it. Removing and re-adding nodes is exactly the shape that provoked the original 19 ms `visibility: hidden` window. |
+| Hover tracing still works inside a focused view            | Hovering ORDER inside a 2-box view traces 2 boxes and sets `data-tracing`.                                                                                                                                                                          |
+| It is a view, not an edit                                  | Undo stays **disabled** through every isolate change, and the toolbar keeps reporting the whole schema's count as the denominator.                                                                                                                  |
+| The gate                                                   | `pnpm verify` green: 855 unit tests in 40 files, 40 e2e specs. Coverage 93.1 / 84.1 / 94.2.                                                                                                                                                         |
+
+**One guard turned out not to guard anything, and the comment now says so.** `Canvas`
+filters edges to those with both ends inside the view; removing that line changes the
+rendered edge count by nothing, the console by nothing and the warnings by nothing —
+**React Flow silently skips any edge whose source or target is missing from `nodeLookup`**.
+The filter is kept for what it saves in objects BUILT, not in lines drawn, and the e2e
+comment no longer claims to be testing it. Worth knowing generally: handing React Flow a
+partial node list is safe.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -459,9 +485,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 847 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.3% branches / 94.2%
+- 855 unit tests in 40 files, ~50s. Coverage 93.1% statements / 84.1% branches / 94.2%
   lines against an 80% gate.
-- **35 e2e specs in 3 files, ~70s, all passing.** No `test.fail()` markers left. `pnpm
+- **40 e2e specs in 3 files, ~95s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -469,7 +495,7 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
   assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
   and says why.
-- Bundle 745 kB raw, 233 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
+- Bundle 747 kB raw, 234 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
   stale by ~18 kB: measured against the commit before FR-3.5 the figure was already
   737/231, and snapping added 4 kB raw / 1.3 kB gzipped. Re-measure the PREVIOUS COMMIT
   before attributing a bundle change to your own work.) Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
@@ -477,6 +503,8 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
+- 3 view controls that narrow what the canvas draws without touching the document: LOD
+  (FR-2.4), culling (NFR-2.4) and isolate (FR-2.8). None of them reaches the store.
 - 14 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — two of which
   (the arrow keys, and Shift for the marquee) are documented rather than bound, and say so.
 - **4 tiers of React Flow node change**, in `render/reactflow/trace.ts`: in-flight
@@ -619,8 +647,7 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. Isolate mode (FR-2.8 — `nHopNeighbourhood` is written and tested, only unwired);
-   expanding one entity from the "N more" row.
+1. Expanding one entity from the "N more" row.
 2. **The palette is missing four commands it claims to have (FR-9.2).** Found while
    building the shortcut sheet, not before: the sheet lists copy, cut, paste and duplicate
    because the keymap binds them, and the Ctrl+K palette offers none of the four. FR-9.2's
@@ -628,6 +655,14 @@ In order:
    rather than the gap being left to be rediscovered. The fix is four entries in
    `paletteCommands` in `Editor.tsx`, next to the handlers that already exist — small, but
    it is a different feature from this one and was not folded into it.
+
+**Isolate mode (FR-2.8) came off this list on 16 Sep 2026** — see the browser table above.
+Three decisions worth not re-opening. **Hide, not dim.** **With nothing selected the mode
+goes idle rather than emptying the canvas** — isolate is defined relative to a selection,
+and the literal reading of an empty one is a blank screen. **The camera move happens in the
+control's own click handler, not in an effect watching the isolation**: an effect would
+re-frame the canvas every time the selection changed while the mode was on, and writing to
+a store from an effect is the cascading-render shape recorded twice in CLAUDE.md.
 
 **Marquee select (FR-2.9) came off this list on 16 Sep 2026** — see the browser table
 above. Two decisions worth not re-opening. **Shift, not bare drag**: left-drag on the pane
@@ -724,6 +759,14 @@ the grid pulls boxes straight back off it.
   clean, including two back-to-back stress runs. Recorded so the next session recognises it
   as OLD rather than as something it has just introduced; if it recurs, run
   `pnpm test:e2e` alone and keep the whole output.
+
+- **`boundaries.test.ts` times out under `pnpm test:coverage`, roughly one run in two.**
+  Named, unlike the flake below it: `rejects domain importing render/lod` took **62.3s**
+  against its own 60s `LINT_TIMEOUT_MS` and passed on the next run. It spawns a real ESLint
+  per forbidden pair, and under v8 instrumentation with 40 workers on these cores that is
+  marginal. `pnpm verify` does not run coverage, so the gate is unaffected — but do not read
+  a red coverage run as a broken boundary without looking at whether it says "timed out".
+  The fix is either a longer timeout for that file or one ESLint run for all 48 pairs.
 
 - **A possible selection race.** While writing a test on 10 Sep, `selectedEntityIds` was
   occasionally empty immediately after "Add your first entity" under coverage

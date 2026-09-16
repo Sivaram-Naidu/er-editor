@@ -2,6 +2,7 @@
 
 import type { LodLevel } from '../../lib/lod'
 
+import { ISOLATE_DEPTHS, isolateLabel } from './isolateOptions'
 import { ThemeToggle } from './ThemeToggle'
 
 export interface ToolbarProps {
@@ -15,6 +16,13 @@ export interface ToolbarProps {
   selectedEntityCount: number
   lod: LodLevel
   lodOverride: LodLevel | undefined
+  /** Hop radius for isolate mode; `undefined` is off (FR-2.8). */
+  isolateDepth: number | undefined
+  /**
+   * How many entities the canvas is actually drawing, when that is fewer than all of
+   * them. `undefined` means all of them, which is the ordinary case.
+   */
+  isolatedCount: number | undefined
   isDirty: boolean
   /** Set when the last autosave failed; replaces the save indicator with the reason. */
   saveError: string | undefined
@@ -24,6 +32,7 @@ export interface ToolbarProps {
   onUndo: () => void
   onRedo: () => void
   onSetLodOverride: (level: LodLevel | undefined) => void
+  onSetIsolateDepth: (depth: number | undefined) => void
   onAutoLayout: () => void
   onExport: () => void
   onImport: () => void
@@ -166,6 +175,35 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
       </div>
 
       <div className="erd-toolbar__group">
+        <label className="erd-field">
+          Isolate
+          <select
+            className="erd-select"
+            value={props.isolateDepth === undefined ? 'off' : String(props.isolateDepth)}
+            onChange={(event) => {
+              const { value } = event.target
+              props.onSetIsolateDepth(value === 'off' ? undefined : Number(value))
+            }}
+            /* Stays enabled with nothing selected, so the mode can always be turned back
+               off. What it does in that state — nothing, until a table is picked — is said
+               by the status line rather than by greying out the escape route. */
+            title={
+              props.selectedEntityCount === 0
+                ? 'Select a table, then isolate around it'
+                : 'Show only what is within this many hops of the selection'
+            }
+          >
+            <option value="off">Off</option>
+            {ISOLATE_DEPTHS.map((depth) => (
+              <option key={depth} value={String(depth)}>
+                {isolateLabel(depth)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="erd-toolbar__group">
         {props.snapToggle}
         <ThemeToggle />
       </div>
@@ -187,8 +225,16 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
 
       <div className="erd-toolbar__group erd-toolbar__group--end">
         <span className="erd-status">
-          {props.entityCount} {props.entityCount === 1 ? 'entity' : 'entities'} · showing{' '}
-          {LOD_LABEL[shown].toLowerCase()}
+          {/* "3 of 120 entities" while isolating. The denominator is the point: a focus
+              mode that narrows the canvas without saying how much it removed is
+              indistinguishable from a schema that is smaller than you thought. */}
+          {props.isolatedCount === undefined
+            ? `${String(props.entityCount)} ${props.entityCount === 1 ? 'entity' : 'entities'}`
+            : `${String(props.isolatedCount)} of ${String(props.entityCount)} entities`}{' '}
+          · showing {LOD_LABEL[shown].toLowerCase()}
+          {props.isolateDepth !== undefined && props.selectedEntityCount === 0
+            ? ' · select a table to isolate'
+            : ''}
         </span>
         {props.layoutError === undefined ? null : (
           <span className="erd-status erd-status--error" role="alert">

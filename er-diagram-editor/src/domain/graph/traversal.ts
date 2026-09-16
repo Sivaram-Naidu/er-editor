@@ -82,3 +82,81 @@ export function connectedComponents(diagram: Diagram): EntityId[][] {
 
   return components
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ISOLATE MODE (FR-2.8)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// "Entities more than N hops away are hidden or heavily dimmed." This tool HIDES them,
+// and the choice is about what isolate is for. Dimming already means "off the traced
+// path" (FR-4.1), so a second dimmed state would say two different things with one
+// treatment — and at a hundred tables dimming saves nothing, while the reason to isolate
+// at a hundred tables is that there is too much on screen.
+//
+// Hiding has one honesty problem, and this is where it is dealt with rather than in the
+// renderer: a box at the EDGE of the view keeps connections to entities that are now
+// hidden, so it reads as having fewer relationships than it has. `hiddenNeighbours` counts
+// them per entity, so the view can say "and three more beyond here" instead of quietly
+// lying about the shape of the schema.
+
+export interface Isolation {
+  /** Entities to draw: the seeds and everything within `depth` hops. */
+  entityIds: ReadonlySet<EntityId>
+  /**
+   * Relationships to draw — the ones with EVERY end inside the view.
+   *
+   * Not `Neighbourhood.relationshipIds`, which deliberately includes connectors leading
+   * out of the neighbourhood because the hover treatment wants them highlighted. Drawing
+   * one of those here would be an edge pointing at a node that is not on the canvas.
+   */
+  relationshipIds: ReadonlySet<RelationshipId>
+  /**
+   * How many distinct neighbours each visible entity has that the view is not showing.
+   *
+   * Absent rather than zero for entities with none, so the common case is a lookup miss
+   * and the renderer can fall through to "nothing hidden" without a per-node value that
+   * changes identity.
+   */
+  hiddenNeighbours: ReadonlyMap<EntityId, number>
+}
+
+/**
+ * What to draw when isolating `seeds` to `depth` hops.
+ *
+ * An empty `seeds` returns an empty isolation — the caller decides what that means, and
+ * the editor treats it as "not isolating anything" rather than as "show nothing", because
+ * a blank canvas is not a useful answer to having deselected everything.
+ */
+export function isolate(diagram: Diagram, seeds: readonly EntityId[], depth: number): Isolation {
+  const { entityIds } = nHopNeighbourhood(diagram, seeds, depth)
+  const relationshipIds = new Set<RelationshipId>()
+  const hidden = new Map<EntityId, Set<EntityId>>()
+
+  for (const entityId of entityIds) {
+    for (const relationship of incidentRelationships(diagram, entityId)) {
+      const outside = relationship.participants
+        .map((participant) => participant.entityId)
+        .filter((id) => !entityIds.has(id))
+
+      if (outside.length === 0) {
+        relationshipIds.add(relationship.id)
+        continue
+      }
+
+      // Counted per ENTITY rather than per relationship: two connectors to the same
+      // hidden table are one table you cannot see, and "+2" would overstate it.
+      let beyond = hidden.get(entityId)
+      if (beyond === undefined) {
+        beyond = new Set<EntityId>()
+        hidden.set(entityId, beyond)
+      }
+      for (const id of outside) beyond.add(id)
+    }
+  }
+
+  return {
+    entityIds,
+    relationshipIds,
+    hiddenNeighbours: new Map([...hidden].map(([id, beyond]) => [id, beyond.size])),
+  }
+}

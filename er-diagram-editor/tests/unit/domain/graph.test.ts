@@ -17,6 +17,7 @@ import {
   incidentRelationships,
   indexOf,
   isRecursive,
+  isolate,
   neighbours,
   nHopNeighbourhood,
   orphanEntities,
@@ -227,5 +228,114 @@ describe('connectedComponents', () => {
     })
 
     expect(connectedComponents(diagram)).toHaveLength(2)
+  })
+})
+
+describe('isolate (FR-2.8)', () => {
+  it('draws the seed and everything within the hop limit', () => {
+    const { diagram, ids } = chain()
+    const view = isolate(diagram, [ids['B']!], 1)
+
+    expect([...view.entityIds].sort()).toEqual([ids['A']!, ids['B']!, ids['C']!].sort())
+  })
+
+  /**
+   * THE INVARIANT THE RENDERER DEPENDS ON.
+   *
+   * `Canvas` filters nodes by `entityIds` and edges by `relationshipIds`, separately. If
+   * those two could disagree — a relationship inside the view with a participant outside
+   * it — React Flow would be handed an edge pointing at a node that is not on the canvas,
+   * which is a console warning and a line to nowhere rather than a crash. Asserted over
+   * every depth rather than on one case, because the boundary is exactly where it would
+   * go wrong.
+   */
+  it('never reports a relationship with an end outside the view', () => {
+    const { diagram, ids } = chain()
+
+    for (const depth of [0, 1, 2, 3, 4]) {
+      for (const seed of Object.values(ids)) {
+        const view = isolate(diagram, [seed], depth)
+
+        for (const relationshipId of view.relationshipIds) {
+          const relationship = diagram.relationships.find(
+            (candidate) => candidate.id === relationshipId,
+          )
+          for (const participant of relationship?.participants ?? []) {
+            expect(
+              view.entityIds.has(participant.entityId),
+              `at depth ${String(depth)} a drawn connector leads to a hidden entity`,
+            ).toBe(true)
+          }
+        }
+      }
+    }
+  })
+
+  it('drops the connector that leads out of the view', () => {
+    // B—C exists and C is hidden at depth 0, so drawing it would be a line to nowhere.
+    const { diagram, ids } = chain()
+    const view = isolate(diagram, [ids['B']!], 0)
+
+    expect(view.relationshipIds.size).toBe(0)
+  })
+
+  it('counts what each boundary entity is hiding, so the view does not lie', () => {
+    // At 1 hop from A: A and B are drawn, and B still connects to C. A box that looks
+    // like a leaf when it is not is a false statement about the schema, not a cosmetic
+    // loss — which is why this is a count rather than nothing.
+    const { diagram, ids } = chain()
+    const view = isolate(diagram, [ids['A']!], 1)
+
+    expect(view.hiddenNeighbours.get(ids['B']!)).toBe(1)
+    expect(view.hiddenNeighbours.has(ids['A']!)).toBe(false)
+  })
+
+  it('counts hidden TABLES, not hidden connectors', () => {
+    // Two relationships between the same pair is one table you cannot see. "+2" would
+    // overstate what is missing, which is the opposite of the badge's purpose.
+    const [a, b] = ['A', 'B'].map((name) => createEntity({ name }))
+    const diagram = createDiagram({
+      entities: [a!, b!],
+      relationships: [
+        createRelationship({ from: a!.id, to: b!.id, name: 'one' }),
+        createRelationship({ from: a!.id, to: b!.id, name: 'two' }),
+      ],
+    })
+
+    expect(isolate(diagram, [a!.id], 0).hiddenNeighbours.get(a!.id)).toBe(1)
+  })
+
+  it('keeps a self-referencing relationship, which has no far end to be outside', () => {
+    // FR-1.12. Both participants are the same entity, so the connector is fully inside
+    // the moment that entity is — and it must not be counted as something hidden.
+    const entity = createEntity({ name: 'EMPLOYEE' })
+    const diagram = createDiagram({
+      entities: [entity],
+      relationships: [createRelationship({ from: entity.id, to: entity.id, name: 'manages' })],
+    })
+
+    const view = isolate(diagram, [entity.id], 0)
+
+    expect(view.relationshipIds.size).toBe(1)
+    expect(view.hiddenNeighbours.size).toBe(0)
+  })
+
+  it('isolates nothing when nothing is seeded', () => {
+    // The editor reads this as "not isolating" and shows the whole diagram. Taking it
+    // literally — draw the empty set — is a blank canvas, which is not a useful answer to
+    // having pressed Escape.
+    const { diagram } = chain()
+    const view = isolate(diagram, [], 2)
+
+    expect(view.entityIds.size).toBe(0)
+    expect(view.relationshipIds.size).toBe(0)
+  })
+
+  it('leaves an orphan entity alone with itself', () => {
+    const { diagram, ids } = chain()
+    const view = isolate(diagram, [ids['E']!], 3)
+
+    expect([...view.entityIds]).toEqual([ids['E']!])
+    expect(view.hiddenNeighbours.size).toBe(0)
   })
 })
