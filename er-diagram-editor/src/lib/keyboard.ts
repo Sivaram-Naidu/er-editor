@@ -55,6 +55,7 @@ const KEY_LABELS: Record<string, string> = {
   backspace: 'Backspace',
   delete: 'Del',
   escape: 'Esc',
+  shift: 'Shift',
   enter: 'Enter',
   ' ': 'Space',
 }

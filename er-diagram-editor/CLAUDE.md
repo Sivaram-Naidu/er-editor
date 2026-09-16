@@ -179,10 +179,32 @@ culling off.
   - The minimap reads the **user** node's size, not the internal one, so
     `nodeHasDimensions` was false forever and it drew nothing at all. The `nodeColor` prop
     is about fill colour and was never the reason it looked empty.
-  - There are now three tiers in `trace.ts`, not two, and a test on the trio: every change
-    React Flow emits must be claimed by exactly one of them. Same shape of gap as the drag
-    teleport above — each function was right on its own, and nothing asked what happened to
-    what they declined.
+  - There are now FOUR tiers in `trace.ts`, and a test on the set: every change React Flow
+    emits must be claimed by exactly one of them. Same shape of gap as the drag teleport
+    above — each function was right on its own, and nothing asked what happened to what
+    they declined.
+- **And `select` changes were the third instance of it.** Dropping them is right for a
+  CLICK — the store owns the selection, and React Flow reads Shift as its marquee key
+  rather than its multi-select key, so its opinion of a shift-click fights ours. It is
+  wrong for a MARQUEE: only React Flow knows what the rubber band covered, because it owns
+  the band, the pointer capture, the viewport transform and the hit test. So Shift+drag
+  drew a perfect rectangle and selected nothing, for as long as the feature was "not built
+  yet". `applySelectionChanges` accepts them, and only between `onSelectionStart` and
+  `onSelectionEnd`. Two details:
+  - **React Flow emits selection DELTAS, not the covered set.** `getSelectionChanges`
+    compares the band's new answer with its previous one, so the batch that adds the fifth
+    box says nothing about the first four. Reading the latest batch selects one box out of
+    five and looks almost right. Accumulate.
+  - **`selectionMode` defaults to `Full`**, which asks the band to contain a box entirely.
+    At 200px-wide tables a band drawn across a row of them selects nothing. `Partial`.
+- **A marquee leaves a pointer-events DEAD ZONE behind it.** React Flow follows one by
+  rendering `.react-flow__nodesselection-rect` around the bounding box of the selection, as
+  a handle for dragging the group, and it is `pointer-events: all` over its whole area.
+  With two tables selected it measured 771x272px and `elementFromPoint` on the connector
+  between them returned the handle, not the connector. There is no prop: `nodesSelectionActive`
+  is store state React Flow sets AFTER `onSelectionEnd` returns, so clearing it there is
+  overwritten on the next line. It is removed in `canvas.css`, and nothing is lost —
+  dragging any selected box already moves the whole selection as one undo step.
 - **`ViewportPortal` is the right home for anything drawn in DIAGRAM units.** It mounts
   into React Flow's own transformed layer, so a child positioned at `translate(640px, 0)`
   pans and zooms with the boxes for free — but it inherits the scale, so any thickness has

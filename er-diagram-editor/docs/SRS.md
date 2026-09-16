@@ -183,7 +183,7 @@ Priorities: **P0** = MVP, ships in V1, non-negotiable. **P1** = V1 if schedule a
 | FR-2.6  | P0       | A search box (`Ctrl+K`) does fuzzy matching over entity names, attribute names, and relationship names. Selecting a result pans and zooms to the target and selects it. Results show which entity an attribute belongs to. | **Done** — `features/search`; matching in `lib/fuzzy.ts`, no library |
 | FR-2.7  | P1       | Entities can be individually pinned to full detail regardless of zoom level.                                                                                                                                               | Partial — model and renderer support pins; no UI control       |
 | FR-2.8  | P1       | "Isolate" mode: with an entity selected, entities more than N hops away are hidden or heavily dimmed. N adjustable 1–3.                                                                                                    | Partial — traversal written and tested; not wired to a control |
-| FR-2.9  | P1       | Marquee (rubber-band) multi-select and shift-click additive selection.                                                                                                                                                     | Open                                                           |
+| FR-2.9  | P1       | Marquee (rubber-band) multi-select and shift-click additive selection.                                                                                                                                                     | **Done** — Shift+drag on the pane draws the band; boxes it TOUCHES (`selectionMode: Partial`) highlight while it is open and reach the store on release. Shift-click stays additive: that gesture never reaches the pane. React Flow's post-marquee group handle is removed — it was a 771x272px pointer dead zone over the canvas |
 | FR-2.10 | P2       | Bookmarked viewports the user can name and jump between.                                                                                                                                                                   | Open (V2)                                                      |
 
 ### 4.3 Layout
@@ -831,8 +831,8 @@ rows below that had to be corrected on 10 Sep 2026 are what happens when that sl
 4. **Edges attaching to the foreign-key row** rather than to box centres. Per-row handles
    exist; the edges ignore them. Needs a fallback for L0 and L1, where those handles are
    not rendered.
-5. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
-   tested, only unwired); expanding one entity from the "N more" row.
+5. Isolate mode (FR-2.8 — `nHopNeighbourhood` is written and tested, only unwired);
+   expanding one entity from the "N more" row.
 6. DBML export (FR-6.7) — one directory plus one line in `src/io/registry.ts`.
 
 Deferred to V2 with slots reserved in the IR: n-ary relationships, ISA hierarchies,

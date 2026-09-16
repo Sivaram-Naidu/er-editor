@@ -507,3 +507,35 @@
      intercept the drag it is describing. */
   pointer-events: none;
 }
+
+/* ── Marquee (FR-2.9) ────────────────────────────────────────────────────── */
+
+/* React Flow draws the band and reads these two custom properties for it, so there is no
+ * rule of ours to fight with — override the variables rather than the class, or the
+ * library's own `.react-flow__selection` declarations win by source order.
+ *
+ * Signal blue, not the guide crimson: a band is a selection in progress, and selection is
+ * exactly what signal already means everywhere else on this canvas. */
+.erd-canvas {
+  --xy-selection-background-color: var(--erd-selection-band);
+  --xy-selection-border: 1px dashed var(--erd-signal);
+}
+
+/* The OTHER rectangle React Flow draws — the one that appears AFTER a marquee, around the
+ * bounding box of what was selected, as a handle for dragging the group.
+ *
+ * Removed rather than styled, and the reason is pointer events rather than looks. It is
+ * `pointer-events: all` over its whole area, and with two tables selected it measured
+ * 771x272px covering everything between them: `document.elementFromPoint` on the connector
+ * label in that gap returned `react-flow__nodesselection-rect`, so the connector could not
+ * be clicked and neither could any unselected table inside the bounds. On a scattered
+ * selection across a large schema that dead zone is most of the screen — the same failure
+ * as the inspector and the minimap in NEXT.md's "Known broken", introduced by us.
+ *
+ * Nothing is lost: dragging any selected box already moves the whole selection, which is
+ * what the handle was for, and `settledPositions` already commits the batch as one move.
+ * There is no prop for this — `nodesSelectionActive` is store state React Flow sets AFTER
+ * `onSelectionEnd` returns, so setting it back there is overwritten on the same line. */
+.react-flow__nodesselection-rect {
+  display: none;
+}

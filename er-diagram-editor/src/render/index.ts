@@ -7,6 +7,7 @@ export {
   type EditorActions,
 } from './reactflow/EditorActions'
 export {
+  applySelectionChanges,
   fallbackPosition,
   inFlightPositions,
   measuredDimensions,

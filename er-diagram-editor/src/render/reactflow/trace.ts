@@ -70,9 +70,7 @@ export function traceSets(
    */
   const relationshipId = pinnedRelationshipId ?? hoveredRelationshipId
   if (relationshipId !== undefined) {
-    const relationship = diagram.relationships.find(
-      (candidate) => candidate.id === relationshipId,
-    )
+    const relationship = diagram.relationships.find((candidate) => candidate.id === relationshipId)
     return {
       entities: new Set(
         relationship?.participants.map((participant) => participant.entityId) ?? [],
@@ -140,9 +138,9 @@ export function inFlightPositions(changes: readonly NodeChange[]): Record<Entity
 /**
  * The moves worth committing, out of a batch of React Flow node changes.
  *
- * Only `position` changes. `selected` is derived from the model, so accepting it would
- * fight the store for ownership of the same fact — but `dimensions` is NOT, and dropping
- * it was a bug for as long as this comment claimed otherwise. See `measuredDimensions`.
+ * Only `position` changes. `dimensions` is NOT derived from the model and has its own
+ * tier — see `measuredDimensions` — and neither is a MARQUEE result, which has a fourth;
+ * see `applySelectionChanges`.
  *
  * And only SETTLED ones — see the note above for what the other tier is for.
  */
@@ -203,6 +201,50 @@ export function measuredDimensions(changes: readonly NodeChange[]): Record<Entit
   }
 
   return sized
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SELECTION IS THE STORE'S, EXCEPT FOR THE ONE THING ONLY REACT FLOW KNOWS
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// `select` changes are dropped everywhere else, and that is right: the store owns the
+// selection, and accepting React Flow's opinion on a click would fight it for the same
+// fact. The library treats Shift as its marquee key rather than as a multi-select key, so
+// it reads a shift-click as a plain one and internally deselects everything else — while
+// this app reads it as "add to the selection" (FR-2.7). There is a note in CLAUDE.md about
+// what that cost the first time.
+//
+// A MARQUEE is the exception, for the same reason `dimensions` was: it is not a derivation
+// of anything in the document. Only React Flow knows which boxes the rubber band covered —
+// it owns the band, the pointer capture, the viewport transform and the hit test. So the
+// result is input, like a drag, and the consumer's job is to pick it up.
+//
+// The subtlety that makes this a function rather than one line: React Flow emits DELTAS.
+// `getSelectionChanges` compares the band's new answer with its previous one and reports
+// only what differs, so a batch late in the gesture says "c was added" and says nothing at
+// all about a and b, which the band has covered since the first frame. Reading the last
+// batch would select one box out of five. The deltas have to be accumulated.
+
+/**
+ * `current`, with one batch of React Flow's select changes folded in.
+ *
+ * Returns `current` itself when the batch says nothing about selection, so a gesture's
+ * many position and dimension batches do not each mint a new Set.
+ */
+export function applySelectionChanges(
+  current: ReadonlySet<EntityId>,
+  changes: readonly NodeChange[],
+): ReadonlySet<EntityId> {
+  let next: Set<EntityId> | undefined
+
+  for (const change of changes) {
+    if (change.type !== 'select') continue
+    next ??= new Set(current)
+    if (change.selected) next.add(change.id as EntityId)
+    else next.delete(change.id as EntityId)
+  }
+
+  return next ?? current
 }
 
 /**
@@ -358,7 +400,5 @@ export function reuseUnchanged<T extends Node>(previous: readonly T[], next: rea
     return node
   })
 
-  return reusedCount === next.length && next.length === previous.length
-    ? (previous as T[])
-    : merged
+  return reusedCount === next.length && next.length === previous.length ? (previous as T[]) : merged
 }

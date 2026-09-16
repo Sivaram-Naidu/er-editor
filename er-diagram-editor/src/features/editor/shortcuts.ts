@@ -68,7 +68,10 @@ export interface Shortcut {
    * a reader looking for a distinction that is not there.
    */
   id: ShortcutId | undefined
-  /** More than one where a command has genuine aliases — Delete and Backspace. */
+  /**
+   * More than one where a command has genuine aliases — Delete and Backspace — or where
+   * the entry documents a family, as the four arrow keys do.
+   */
   chords: Chord[]
   label: string
   group: ShortcutGroup
@@ -160,6 +163,15 @@ export const EDITOR_SHORTCUTS: readonly Shortcut[] = [
     id: undefined,
     chords: [{ key: 'ArrowUp' }, { key: 'ArrowDown' }, { key: 'ArrowLeft' }, { key: 'ArrowRight' }],
     label: 'Nudge the selected table',
+    group: 'Getting around',
+  },
+  {
+    // A pointer gesture in a sheet titled "Keyboard shortcuts", and it belongs there: the
+    // key IS what turns a drag into a selection, and there is nowhere else a user would
+    // look to find out that it does. Documented, not bound — React Flow owns the band.
+    id: undefined,
+    chords: [{ key: 'Shift' }],
+    label: 'Hold, then drag on empty canvas to select a region',
     group: 'Getting around',
   },
 ]

@@ -7,6 +7,7 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   useStoreApi,
   type Connection,
   type Edge,
@@ -35,6 +36,7 @@ import { RevealController } from './RevealController'
 import { AlignmentGuides } from './overlays/AlignmentGuides'
 import { alignDrag, sameGuides, type Guide, type Rect } from './overlays/alignment'
 import {
+  applySelectionChanges,
   fallbackPosition,
   inFlightPositions,
   measuredDimensions,
@@ -227,6 +229,39 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
   const dragging = useRef(false)
 
   /**
+   * The boxes the rubber band is covering right now, or `undefined` when there is no band.
+   *
+   * `undefined` rather than an empty Set is the whole guard: it is what says "a marquee is
+   * in progress", and outside one every `select` change React Flow emits is ignored, which
+   * is what keeps the store the authority on a click. See the note in trace.ts.
+   *
+   * A ref because nothing renders from it — React Flow draws its own band — and because
+   * reading state here would make a callback that runs at pointer rate depend on it.
+   */
+  const marquee = useRef<ReadonlySet<EntityId> | undefined>(undefined)
+
+  /**
+   * The same set again, published for rendering so the boxes light up as the band crosses
+   * them (FR-2.9). `undefined` means no band is up.
+   *
+   * Two copies of one fact, and the reason is timing rather than tidiness. The REF is the
+   * authority: it is written synchronously as the changes arrive, so `onSelectionEnd`
+   * cannot read a value one batch stale if a fast flick delivers the last move and the
+   * release in the same task. The STATE is what a render can see, and it is published only
+   * when the covered set actually changes — React Flow emits nothing while the band moves
+   * over empty canvas, so this is a handful of renders per gesture rather than one per
+   * pointer frame.
+   *
+   * It does NOT join `selectionMoved` below, deliberately. That full rebuild exists
+   * because React Flow's private idea of what is selected diverges from ours on a
+   * shift-click; during a band it does not diverge, because React Flow computed the band
+   * and mutated its own nodes to match. So `reuseUnchanged` is safe here, and a box
+   * entering the band costs one new node object and one wrapper render rather than a
+   * hundred and twenty.
+   */
+  const [banded, setBanded] = useState<ReadonlySet<EntityId> | undefined>(undefined)
+
+  /**
    * The pinned trace (FR-4.4), derived from the selection rather than stored beside it.
    *
    * Reusing the selection is what keeps this from being a feature: no new state, no second
@@ -318,7 +353,11 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
       id: entity.id,
       type: 'entity',
       position: diagram.layout.positions[entity.id] ?? fallbackPosition(index),
-      selected: props.selectedEntityIds.has(entity.id),
+      // While a band is up it REPLACES the selection on screen rather than adding to it,
+      // because that is what releasing it will do. Showing the union would light up boxes
+      // that are about to be deselected.
+      selected:
+        banded === undefined ? props.selectedEntityIds.has(entity.id) : banded.has(entity.id),
       data: {
         entity,
         lod,
@@ -336,6 +375,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     traced,
     tracedAttributesByEntity,
     foreignKeyTargets,
+    banded,
     props.selectedEntityIds,
     props.selectedAttributeId,
     props.editable,
@@ -508,6 +548,15 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         )
       }
 
+      // Only while the band is up — see `applySelectionChanges`.
+      if (marquee.current !== undefined) {
+        const next = applySelectionChanges(marquee.current, changes)
+        if (next !== marquee.current) {
+          marquee.current = next
+          setBanded(next)
+        }
+      }
+
       const moved = settledPositions(changes)
       if (Object.keys(moved).length > 0) {
         const wasDragging = dragging.current
@@ -573,6 +622,26 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         onPaneClick={() => {
           props.onSelectEntities([], false)
         }}
+        /* FR-2.9. React Flow owns the band itself — the pointer capture, the rectangle,
+           the viewport maths and the hit test — and reports what it covered as `select`
+           changes. These two handlers are the brackets that say those changes are a
+           marquee's rather than a click's. */
+        onSelectionStart={() => {
+          marquee.current = new Set()
+          setBanded(marquee.current)
+        }}
+        onSelectionEnd={() => {
+          const selected = marquee.current
+          marquee.current = undefined
+          setBanded(undefined)
+          if (selected === undefined) return
+          /* Not additive. Shift is the key that STARTS the band, so "shift to add" has no
+             room left to mean anything here; a marquee replaces the selection, and an
+             empty band clears it — which is what dragging across empty canvas should do
+             anyway. Shift-CLICK is still additive (FR-2.7): that gesture never reaches
+             this pane handler. */
+          props.onSelectEntities([...selected], false)
+        }}
         onMove={(_event, viewport) => {
           props.onViewportChange(viewport)
         }}
@@ -587,9 +656,17 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
         {...(props.viewport === undefined
           ? { fitView: true }
           : { defaultViewport: props.viewport })}
-        /* Selection is owned by the store, so React Flow's own drag-select stays off;
-         * the marquee arrives later wired to the same store. */
+        /* Left-drag on the pane PANS, so drag-select is off and the band is on Shift
+         * instead — `selectionKeyCode` defaults to it, and React Flow disables panning for
+         * as long as the key is held. Panning is the gesture a reader of a 120-table
+         * diagram makes constantly; selecting a region is not. */
         selectionOnDrag={false}
+        /* Touch, not enclose. `Full` — the default — asks the band to contain a box
+         * entirely, and at this scale a table is 200px wide and several hundred tall, so
+         * a band drawn across a row of them selects nothing and reads as broken. Partial
+         * can over-select, which is visible and one more drag to correct; Full
+         * under-selects silently. */
+        selectionMode={SelectionMode.Partial}
         panOnDrag
         /* Drag-to-connect is the gesture people reach for first in a diagram tool.
          * Leaving it off meant the only route to a relationship was select-two-then-R,

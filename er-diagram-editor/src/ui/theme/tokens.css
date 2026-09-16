@@ -34,6 +34,12 @@
   --erd-danger: #a4262c;
   --erd-warning: #8a5300;
 
+  /* Marquee fill (FR-2.9). TRANSLUCENT, and that is the requirement rather than a taste:
+   * the band is drawn over the boxes it is selecting, so an opaque fill — `signal-wash`
+   * was the first attempt — hides the tables you are aiming at behind a blue rectangle.
+   * Measured by looking at it. */
+  --erd-selection-band: rgb(26 86 219 / 10%);
+
   /* ── Alignment guides (FR-3.5) ───────────────────────────────────────── */
   /* The one place a second hue earns its keep, and the reason is the first one above:
    * signal is reserved for the traced path, and a guide is drawn while a box is SELECTED
@@ -120,6 +126,7 @@
   --erd-warning: #e0a955;
 
   --erd-guide: #ff79b0;
+  --erd-selection-band: rgb(111 157 255 / 16%);
 
   --erd-dim-opacity: 0.45;
   --erd-minimap-mask: rgb(0 0 0 / 45%);

@@ -29,6 +29,7 @@ import {
 import {
   AlignmentGuides,
   EntityNode,
+  applySelectionChanges,
   fallbackPosition,
   inFlightPositions,
   measuredDimensions,
@@ -540,7 +541,47 @@ describe('sizesUnchanged', () => {
   })
 })
 
-describe('the three tiers together', () => {
+describe('applySelectionChanges (FR-2.9)', () => {
+  const select = (id: string, selected: boolean) => ({ id, type: 'select', selected }) as const
+
+  it('ACCUMULATES, because React Flow reports deltas and not the whole band', () => {
+    /*
+     * THE TRAP THIS FUNCTION EXISTS FOR.
+     *
+     * `getSelectionChanges` compares the band's new answer with its previous one and emits
+     * only the difference, so the batch that adds the fifth box says nothing about the
+     * first four — they have been covered since the first frame and have not CHANGED.
+     * Reading the latest batch, which is what every other tier in this file does, would
+     * select one box out of five and look almost right.
+     */
+    let covered = applySelectionChanges(new Set<EntityId>(), [select('a', true)])
+    covered = applySelectionChanges(covered, [select('b', true)])
+    covered = applySelectionChanges(covered, [select('c', true)])
+
+    expect([...covered].sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('drops a box the band has moved off', () => {
+    const covered = applySelectionChanges(new Set(['a', 'b'] as EntityId[]), [select('a', false)])
+
+    expect([...covered]).toEqual(['b'])
+  })
+
+  it('returns the SAME set when the batch says nothing about selection', () => {
+    // Identity, not equality. A band drag emits position and dimension batches too, and
+    // minting a new Set for each would publish state — and rebuild the node array — on
+    // every pointer frame rather than only when the covered set moves.
+    const covered: ReadonlySet<EntityId> = new Set(['a'] as EntityId[])
+    const changes: NodeChange[] = [
+      { id: 'a', type: 'position', position: { x: 1, y: 1 }, dragging: true },
+      { id: 'a', type: 'dimensions', dimensions: { width: 10, height: 10 } },
+    ]
+
+    expect(applySelectionChanges(covered, changes)).toBe(covered)
+  })
+})
+
+describe('the four tiers together', () => {
   const node = (id: string): Node => ({ id, position: { x: 0, y: 0 }, data: {} })
 
   /**
@@ -562,18 +603,27 @@ describe('the three tiers together', () => {
    * declined was picked up by anything else, which is the same gap the position tiers had.
    */
   it('claims every change React Flow emits in exactly one tier', () => {
+    const empty: ReadonlySet<EntityId> = new Set()
     const changes: NodeChange[] = [
       { id: 'a', type: 'position', position: { x: 10, y: 10 }, dragging: true },
       { id: 'a', type: 'position', position: { x: 30, y: 30 }, dragging: false },
       { id: 'a', type: 'dimensions', dimensions: { width: 240, height: 120 } },
       { id: 'b', type: 'dimensions', dimensions: { width: 180, height: 90 } },
+      // The fourth tier, added with the marquee (FR-2.9). `select` used to be claimed by
+      // NOTHING — React Flow drew a rubber band over the canvas and the selection it
+      // computed went nowhere, which is the same shape of gap as the two above.
+      { id: 'a', type: 'select', selected: true },
+      { id: 'b', type: 'select', selected: false },
     ]
 
     changes.forEach((change, index) => {
       const claims =
         Object.keys(inFlightPositions([change])).length +
         Object.keys(settledPositions([change])).length +
-        Object.keys(measuredDimensions([change])).length
+        Object.keys(measuredDimensions([change])).length +
+        // Identity, not size: a `select: false` on an empty set legitimately produces an
+        // empty answer, and the question here is whether the tier reacted at all.
+        (applySelectionChanges(empty, [change]) === empty ? 0 : 1)
 
       expect(
         claims,

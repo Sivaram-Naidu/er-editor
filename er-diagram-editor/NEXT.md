@@ -356,6 +356,32 @@ shift, because the character already encodes it and does so differently across l
 Both have tests. **`Escape` deliberately does not `preventDefault`** — clearing the
 selection is not a claim on the key.
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — marquee session)
+
+FR-2.9, the first entry in Tier 3. **It was already half-there and worse than absent:** the
+rubber band drew perfectly and selected NOTHING, because `select` changes were dropped
+alongside the position and dimension changes that turned out not to be droppable either.
+Same family as the two traps already in CLAUDE.md, third instance.
+
+| Thing                                                    | Evidence                                                                                                                                                                                                                                                 |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Before: the band worked, the selection did not            | Shift-drag over CUSTOMER and ORDER: `.react-flow__selection` present, `.react-flow__node.selected` **0**, inspector closed, Delete disabled, and Delete removed nothing.                                                                                  |
+| After: the document knows                                 | Same gesture → 2 selected, inspector reads "2 entities selected", Delete removes exactly those two and leaves ORDER_LINE and PRODUCT.                                                                                                                     |
+| Touch, not enclose                                        | The spec's band only clips the TOP 40px of both boxes. Under React Flow's default `Full` mode that selects **0** — mutated and checked. `Partial` is why a band across a row of 200px-wide tables does something.                                        |
+| **Boxes light up while the band is open**                 | Asserted mid-gesture, not after: `.react-flow__node.selected` is 2 before the button comes up. Costs one new node object and one wrapper render per box entering the band, because band changes deliberately skip the full-rebuild path — see `Canvas.tsx`. |
+| The band does not hide what it covers                     | First attempt used `--erd-signal-wash`, which is opaque: the screenshot showed a blue rectangle where CUSTOMER should be. `--erd-selection-band` is 10% alpha. Found by looking at the picture, not by any assertion.                                    |
+| **The group handle was a dead zone, and is gone**         | React Flow follows a marquee with `.react-flow__nodesselection-rect` around the selection's bounds, `pointer-events: all`. Measured **771x272px**, and `elementFromPoint` on the connector between the two boxes returned the handle. Removed in CSS — it has no prop, and `nodesSelectionActive` is set AFTER `onSelectionEnd` returns. |
+| Nothing was lost with it                                  | Dragging any member still moves the whole selection — CUSTOMER and ORDER both +150px, ORDER_LINE unmoved — as ONE undo step reading "Undo Move entities".                                                                                                |
+| An empty band clears the selection                        | Band over blank canvas below the schema takes the selection from 1 to 0.                                                                                                                                                                                  |
+| Shift-click is still additive (FR-2.7)                    | Unchanged: the shift-click gesture never reaches the pane handler, and its existing spec still passes.                                                                                                                                                    |
+| The gate                                                  | `pnpm verify` green: 847 unit tests in 40 files, 35 e2e specs. Coverage 93.0 / 84.3 / 94.2.                                                                                                                                                              |
+
+**One of these four specs was worthless until it was mutated.** The dead-zone test built
+its selection by shift-click and passed with the handle restored, because React Flow raises
+the handle in the MARQUEE's own pointer-up and nowhere else — so a shift-clicked pair never
+has one. It builds the selection with a band now. Mutate the fix and re-run the guard;
+this is the third time that rule has earned its place.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -433,9 +459,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 844 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
+- 847 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.3% branches / 94.2%
   lines against an 80% gate.
-- **31 e2e specs in 3 files, ~65s, all passing.** No `test.fail()` markers left. `pnpm
+- **35 e2e specs in 3 files, ~70s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -443,7 +469,7 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
   assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
   and says why.
-- Bundle 744 kB raw, 233 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
+- Bundle 745 kB raw, 233 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
   stale by ~18 kB: measured against the commit before FR-3.5 the figure was already
   737/231, and snapping added 4 kB raw / 1.3 kB gzipped. Re-measure the PREVIOUS COMMIT
   before attributing a bundle change to your own work.) Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
@@ -451,8 +477,12 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
-- 13 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — one of which
-  (the arrow keys) is documented rather than bound, and says so.
+- 14 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — two of which
+  (the arrow keys, and Shift for the marquee) are documented rather than bound, and say so.
+- **4 tiers of React Flow node change**, in `render/reactflow/trace.ts`: in-flight
+  positions, settled positions, measured dimensions, and marquee selection. Every one of
+  them was once dropped as "derived from the model"; none of them was. There is a test on
+  the set.
 - 2 user preferences persisted outside the document: theme (FR-9.3) and snap-to-grid
   (FR-3.5). Both write through a hook rather than from the control, so the toolbar and the
   Ctrl+K palette cannot set one and forget the other.
@@ -589,8 +619,8 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. Marquee select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and
-   tested, only unwired); expanding one entity from the "N more" row.
+1. Isolate mode (FR-2.8 — `nHopNeighbourhood` is written and tested, only unwired);
+   expanding one entity from the "N more" row.
 2. **The palette is missing four commands it claims to have (FR-9.2).** Found while
    building the shortcut sheet, not before: the sheet lists copy, cut, paste and duplicate
    because the keymap binds them, and the Ctrl+K palette offers none of the four. FR-9.2's
@@ -598,6 +628,13 @@ In order:
    rather than the gap being left to be rediscovered. The fix is four entries in
    `paletteCommands` in `Editor.tsx`, next to the handlers that already exist — small, but
    it is a different feature from this one and was not folded into it.
+
+**Marquee select (FR-2.9) came off this list on 16 Sep 2026** — see the browser table
+above. Two decisions worth not re-opening. **Shift, not bare drag**: left-drag on the pane
+pans, and panning is the gesture a reader of a 120-table diagram makes constantly.
+**`Partial`, not `Full`**: a band that has to swallow a whole table selects nothing at this
+scale and reads as broken, and over-selecting is visible and one drag to correct while
+under-selecting is silent.
 
 **The keyboard shortcut sheet (FR-9.1) came off this list on 16 Sep 2026** — see the
 browser table above. What is worth not re-opening is the shape rather than the dialog:

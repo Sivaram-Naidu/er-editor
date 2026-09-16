@@ -741,3 +741,155 @@ test('? typed into a field types a question mark (FR-9.1)', async ({ page }) => 
   await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toHaveCount(0)
   await expect(nameField).toHaveValue('CUSTOMER?')
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MARQUEE SELECT (FR-2.9)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Before this, holding Shift and dragging on the pane drew a rubber band and selected
+// NOTHING — React Flow computed which boxes it covered, reported them as `select` changes,
+// and the app dropped every one. The band was the only part that worked, which is the most
+// convincing way for a feature to be broken.
+//
+// So these assert the store, not the rectangle: what the inspector says, and what Delete
+// actually removes.
+
+/** Shift-drag a rectangle over the pane, in SCREEN pixels. */
+async function marquee(
+  page: Page,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  duringDrag?: () => Promise<void>,
+): Promise<void> {
+  await page.keyboard.down('Shift')
+  await page.mouse.move(from.x, from.y)
+  await page.mouse.down()
+  for (let frame = 1; frame <= 12; frame++) {
+    await page.mouse.move(
+      from.x + ((to.x - from.x) * frame) / 12,
+      from.y + ((to.y - from.y) * frame) / 12,
+    )
+  }
+  if (duringDrag !== undefined) await duringDrag()
+  await page.mouse.up()
+  await page.keyboard.up('Shift')
+}
+
+test('a rubber band selects what it touches, and the document knows (FR-2.9)', async ({ page }) => {
+  await openSample(page)
+
+  const boxes = await nodeBoxes(page)
+  const customer = entity(page, 'CUSTOMER')
+  const order = entity(page, 'ORDER')
+  const customerRect = (await customer.boundingBox())!
+  const orderRect = (await order.boundingBox())!
+
+  // A band that only CLIPS the tops of the two left-hand boxes. It would select nothing
+  // under React Flow's default `Full` mode, which is why the canvas asks for `Partial`:
+  // at this scale a band that has to swallow a whole table whole is a band that misses.
+  await marquee(
+    page,
+    { x: customerRect.x - 30, y: customerRect.y - 30 },
+    { x: orderRect.x + orderRect.width - 10, y: customerRect.y + 40 },
+    async () => {
+      // The boxes light up WHILE the band is open, not only when it is released — the
+      // point of a rubber band is seeing what you are about to take.
+      await expect(page.locator('.react-flow__node.selected')).toHaveCount(2)
+    },
+  )
+
+  expect(await selectedIds(page)).toHaveLength(2)
+
+  // The store, not the DOM class: the inspector only opens on a real selection, and
+  // Delete only removes what the document believes is selected.
+  await expect(page.getByText('2 entities selected')).toBeVisible()
+  await page.keyboard.press('Delete')
+  await expect(page.locator('.react-flow__node')).toHaveCount(boxes.length - 2)
+  await expect(entity(page, 'ORDER_LINE')).toBeVisible()
+  await expect(entity(page, 'PRODUCT')).toBeVisible()
+})
+
+test('a band over empty canvas clears the selection (FR-2.9)', async ({ page }) => {
+  await openSample(page)
+  await coldClick(page, entity(page, 'CUSTOMER'))
+  expect(await selectedIds(page)).toHaveLength(1)
+
+  // Well below every box in the sample.
+  await marquee(page, { x: 200, y: 700 }, { x: 600, y: 850 })
+
+  expect(await selectedIds(page)).toHaveLength(0)
+})
+
+test('the selection does not leave a dead zone over the canvas (FR-2.9)', async ({ page }) => {
+  /*
+   * React Flow follows a marquee by drawing a second rectangle around the bounding box of
+   * what was selected, as a handle for dragging the group. It is `pointer-events: all`
+   * over its whole area: with CUSTOMER and ORDER selected it measured 771x272 px, and
+   * `elementFromPoint` on the connector between them returned the handle rather than the
+   * connector. On a selection scattered across a large schema that dead zone is most of
+   * the screen — so the handle is removed, and this is what says so.
+   *
+   * The selection is made WITH A BAND, and that detail is the test. Built by shift-click
+   * instead, this passed with the handle restored: React Flow raises it in the marquee's
+   * own pointer-up and nowhere else, so a shift-clicked pair never has one and the
+   * assertion was asserting nothing.
+   */
+  await openSample(page)
+
+  const customerRect = (await entity(page, 'CUSTOMER').boundingBox())!
+  const orderRect = (await entity(page, 'ORDER').boundingBox())!
+  await marquee(
+    page,
+    { x: customerRect.x - 30, y: customerRect.y - 30 },
+    { x: orderRect.x + orderRect.width - 10, y: customerRect.y + 40 },
+  )
+  expect(await selectedIds(page)).toHaveLength(2)
+
+  const label = page.locator('.erd-edge__label', { hasText: 'places' })
+  const at = (await label.boundingBox())!
+  const topmost = await page.evaluate(
+    (point) => document.elementFromPoint(point.x, point.y)?.className.toString() ?? 'nothing',
+    { x: at.x + at.width / 2, y: at.y + at.height / 2 },
+  )
+
+  expect(topmost).not.toContain('nodesselection-rect')
+})
+
+test('dragging one of a marquee selection moves all of it, as one undo step (FR-2.9)', async ({
+  page,
+}) => {
+  // The group-drag handle was removed above, so this is the claim that nothing was lost
+  // with it: dragging any member still moves the whole selection.
+  await openSample(page)
+
+  const customerRect = (await entity(page, 'CUSTOMER').boundingBox())!
+  const orderRect = (await entity(page, 'ORDER').boundingBox())!
+  await marquee(
+    page,
+    { x: customerRect.x - 30, y: customerRect.y - 30 },
+    { x: orderRect.x + orderRect.width - 10, y: customerRect.y + 40 },
+  )
+  expect(await selectedIds(page)).toHaveLength(2)
+
+  const before = await nodeBoxes(page)
+  const start = await headerPoint(entity(page, 'CUSTOMER'))
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  for (let frame = 1; frame <= 10; frame++) {
+    await page.mouse.move(start.x, start.y + (200 * frame) / 10)
+  }
+  await page.mouse.up()
+
+  const after = await nodeBoxes(page)
+  const moved = (name: string) =>
+    after.find((box) => box.name === name)!.y - before.find((box) => box.name === name)!.y
+
+  expect(moved('CUSTOMER'), 'the dragged box did not move').toBeGreaterThan(50)
+  expect(moved('ORDER'), 'the other selected box was left behind').toBe(moved('CUSTOMER'))
+  expect(moved('ORDER_LINE'), 'an unselected box came along').toBe(0)
+
+  await expect(page.getByRole('button', { name: /Undo/ })).toHaveAttribute(
+    'title',
+    'Undo Move entities',
+  )
+})
