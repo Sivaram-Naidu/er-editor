@@ -489,3 +489,21 @@
   color: var(--erd-signal);
   background: var(--erd-signal-wash);
 }
+
+/* ── Alignment guides (FR-3.5) ───────────────────────────────────────────── */
+
+/* Drawn inside React Flow's transformed viewport by `AlignmentGuides`, so the geometry
+ * is in diagram units and comes in as inline styles — position, length, and a thickness
+ * already divided by the zoom. Everything that is NOT geometry belongs here.
+ *
+ * `z-index` above the boxes deliberately: a guide that ran behind the table it is lining
+ * up with would disappear at exactly the moment the two edges met, which is the moment it
+ * exists to confirm. Nothing else on the canvas claims a z-index this high; the traced
+ * node rule above tops out at 5. */
+.erd-guide {
+  z-index: 10;
+  background: var(--erd-guide);
+  /* The gesture is already live and this is drawn at pointer rate; it must not be able to
+     intercept the drag it is describing. */
+  pointer-events: none;
+}

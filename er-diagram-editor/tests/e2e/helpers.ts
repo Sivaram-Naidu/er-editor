@@ -125,6 +125,48 @@ export async function nodeTransforms(page: Page): Promise<string[]> {
     .evaluateAll((nodes) => nodes.map((node) => (node as HTMLElement).style.transform))
 }
 
+/** A box in DIAGRAM units, which is the unit alignment and snapping are specified in. */
+export interface NodeBox {
+  name: string
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Every node's rectangle, in diagram units.
+ *
+ * Position comes from `style.transform` and size from `offsetWidth`/`offsetHeight`, both
+ * of which are PRE-transform — a node sits inside React Flow's scaled viewport, so
+ * `getBoundingClientRect` would report screen pixels and mix the two units together. See
+ * the note in NEXT.md; this is the same mistake the measurement spec had to avoid.
+ */
+export async function nodeBoxes(page: Page): Promise<NodeBox[]> {
+  return page.locator('.react-flow__node').evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const element = node as HTMLElement
+      const matrix = new DOMMatrix(element.style.transform)
+      return {
+        name: element.querySelector('.erd-node__name')?.textContent ?? '',
+        x: matrix.e,
+        y: matrix.f,
+        width: element.offsetWidth,
+        height: element.offsetHeight,
+      }
+    }),
+  )
+}
+
+/** The zoom React Flow settled on, needed to turn a diagram distance into a pointer one. */
+export async function viewportZoom(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const viewport = document.querySelector('.react-flow__viewport')
+    if (viewport === null) return 1
+    return new DOMMatrix(getComputedStyle(viewport).transform).a
+  })
+}
+
 /**
  * Open a file through the app's own "Open file" dialog.
  *

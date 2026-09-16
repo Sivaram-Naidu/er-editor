@@ -37,6 +37,11 @@ export interface ToolbarProps {
    * is.
    */
   validationToggle: React.ReactNode
+  /**
+   * The snap-to-grid toggle (FR-3.5). A node for the same reason as the two above: it
+   * owns a preference, and the toolbar has no business knowing that preferences persist.
+   */
+  snapToggle: React.ReactNode
   isLayingOut: boolean
   layoutError: string | undefined
 }
@@ -154,6 +159,7 @@ export function Toolbar(props: ToolbarProps): React.ReactElement {
       </div>
 
       <div className="erd-toolbar__group">
+        {props.snapToggle}
         <ThemeToggle />
       </div>
 

@@ -1,6 +1,6 @@
 # What to work on next
 
-**Working queue. Updated 12 September 2026.**
+**Working queue. Updated 16 September 2026.**
 
 This file exists so a session starting cold — after `/clear`, or a week later, or someone
 else entirely — knows where the project actually stands and what to pick up, without
@@ -304,6 +304,33 @@ FR-7.4, the first entry in Tier 3. `pnpm test:e2e` plus eleven unit tests on the
 | Nothing shouted in the browser                     | Zero `role="alert"` through duplicate, undo, copy and two pastes.                                                                                                                                                                     |
 | The gate                                           | `pnpm verify` green: 788 unit tests in 36 files, 25 e2e specs, typecheck and lint clean.                                                                                                                                              |
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — snap and guides session)
+
+FR-3.5, the first entry in Tier 3. Driven with Playwright against the system Chrome at
+1400x900 on the four-box sample, with the screenshots looked at rather than only counted.
+
+| Thing                                                     | Evidence                                                                                                                                                                                                                                                                              |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A near-miss is pulled onto the edge                        | `PRODUCT` dragged up from y = 260 lands with its **bottom edge exactly on `ORDER`'s bottom edge**, and a crimson guide is drawn from `ORDER`'s left edge to `PRODUCT`'s right at that y. Screenshot, not a count.                                                                     |
+| **What is drawn is what is committed**                     | Mid-drag transform `translate(640px, 14px)`; after release, byte-identical. Mutating the settled tier to commit the RAW position makes it release to `translate(640px, 17.1319px)` and the guard fails by name — that is the whole reason the assertion is on the pair.                |
+| The guide paints OVER a box, not under one                 | `CUSTOMER` dragged until its top edge meets `ORDER`'s vertical middle: the line runs straight across `ORDER`'s `customer_id` row, visible in a crop. `.erd-guide` is `z-index: 10` against a node's 0 (5 when traced), in the viewport's stacking context, with the portal last in DOM. |
+| The magnet lets go                                         | `CUSTOMER` moved 40 units down — outside the 6px tolerance of every edge on screen — lands at **36.0047**, sharing no edge with anything. A tool that quietly refuses to put a box where you put it would be worse than no snapping.                                                   |
+| Guides are a gesture, not a state                          | `.erd-guide` count is 0 the moment the button comes up.                                                                                                                                                                                                                                |
+| Snap-to-grid rounds the drop                               | With `Snap` pressed, `ORDER` dragged by (53, 91) diagram units lands on **(368, 80)** — both multiples of 16. Mutating the `snapToGrid` prop to a constant `false` fails the spec.                                                                                                     |
+| The toggle reads as a state                                | `aria-pressed` `false` → `true`, and the button takes the signal colour and wash. Written to preferences, so a reload keeps it.                                                                                                                                                         |
+| One gesture is still one undo step                         | Undo reads "Undo Move entity" after a snapped drag, unchanged.                                                                                                                                                                                                                         |
+| The gate                                                   | `pnpm verify` green: 819 unit tests in 38 files, 28 e2e specs. Coverage 92.9 / 83.9 / 94.1, up on all three.                                                                                                                                                                            |
+
+Worth not re-deriving: React Flow owns the grid half — `snapToGrid`/`snapGrid` round the
+position it REPORTS, so both tiers see the same number and nothing downstream has to know
+the grid exists. Alignment has no such support and cannot: it is a question about the other
+boxes. The tolerance is **6 screen pixels divided by the zoom**, and the candidate boxes are
+limited to the ones inside the viewport — at 120 tables some edge is within a few pixels of
+almost any cursor position, and without the limit the drag feels magnetised to nothing
+visible. Guides use a **new token, `--erd-guide`**, rather than `--erd-signal`: a guide is
+drawn while the box is selected and therefore already outlined in signal blue, so the same
+blue is invisible at exactly the moment it is meant to confirm something.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -381,9 +408,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 788 unit tests in 36 files, ~50s. Coverage 92.7% statements / 83.5% branches / 93.9%
+- 819 unit tests in 38 files, ~50s. Coverage 92.9% statements / 83.9% branches / 94.1%
   lines against an 80% gate.
-- **25 e2e specs in 3 files, ~55s, all passing.** No `test.fail()` markers left. `pnpm
+- **28 e2e specs in 3 files, ~60s, all passing.** No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
   download is needed.
 - **3 browser perf specs in `tests/e2e/perf.spec.ts`, ~2 min, run by `pnpm
@@ -391,11 +418,17 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   they must be served by `vite preview` rather than `pnpm dev` and because wall-clock
   assertions do not belong in the gate. `playwright.config.ts` has a `testIgnore` for them
   and says why.
-- Bundle 719 kB raw, 225 kB gzipped. Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
+- Bundle 741 kB raw, 232 kB gzipped. (The 719/225 recorded here before 16 Sep 2026 was
+  stale by ~18 kB: measured against the commit before FR-3.5 the figure was already
+  737/231, and snapping added 4 kB raw / 1.3 kB gzipped. Re-measure the PREVIOUS COMMIT
+  before attributing a bundle change to your own work.) Lazy chunks: `ElkLayoutEngine` 6.8 kB with elk-api
   inlined, and `elk-worker.min` 1,595 kB / 465 kB gzipped — both fetched on first layout
   only, never at boot.
 - 8 validation rules; 3 importers (`.erd.json`, `.mmd`, `.sql`); 4 export formats
   (`.erd.json`, `.mmd`, PNG, SVG).
+- 2 user preferences persisted outside the document: theme (FR-9.3) and snap-to-grid
+  (FR-3.5). Both write through a hook rather than from the control, so the toolbar and the
+  Ctrl+K palette cannot set one and forget the other.
 
 ---
 
@@ -529,9 +562,16 @@ computed by the same pure function that then gets applied — not a second descr
 
 In order:
 
-1. Snap-to-grid and alignment guides (FR-3.5); keyboard shortcut sheet (FR-9.1); marquee
-   select (FR-2.9); isolate mode (FR-2.8 — `nHopNeighbourhood` is written and tested, only
-   unwired); expanding one entity from the "N more" row.
+1. Keyboard shortcut sheet (FR-9.1); marquee select (FR-2.9); isolate mode (FR-2.8 —
+   `nHopNeighbourhood` is written and tested, only unwired); expanding one entity from the
+   "N more" row.
+
+**Snap-to-grid and alignment guides (FR-3.5) came off this list on 16 Sep 2026** — see the
+browser table above. The design decision worth not re-opening: the two halves are NOT one
+switch. Guides are drawn on every drag; the toggle only decides whether the grid also
+rounds the drop, and while it is on the alignment magnet stands down (tolerance 0, which
+still REPORTS the alignments the grid has already made exact). A second magnet on top of
+the grid pulls boxes straight back off it.
 
 ---
 
@@ -601,6 +641,14 @@ In order:
   passed on retry. By this project's own convention that belongs in `pnpm test:perf`, not the
   gate. Left alone deliberately, so it does not look like a gate was weakened to go green —
   but it will flake again.
+- **One unidentified e2e failure, seen once on 16 Sep 2026 and not since.** A `pnpm verify`
+  run reported `1 failed / 27 passed` with no artifact kept and the spec name filtered out
+  of the captured output — so all that is known is that it happened, on the slowest run of
+  the session (1.6 min against a usual 1.0). Five consecutive full runs afterwards were
+  clean, including two back-to-back stress runs. Recorded so the next session recognises it
+  as OLD rather than as something it has just introduced; if it recurs, run
+  `pnpm test:e2e` alone and keep the whole output.
+
 - **A possible selection race.** While writing a test on 10 Sep, `selectedEntityIds` was
   occasionally empty immediately after "Add your first entity" under coverage
   instrumentation, meaning a newly added entity is sometimes not selected and the inspector
@@ -711,6 +759,12 @@ Interaction-specific, learned while fixing click-to-select:
   the press** — which is also what a person does. See `coldClick`.
 - **A single `mouse.move` between down and up is not a drag.** It registers as nothing.
   Send several small steps.
+- **A scripted drag lands SHORT by its first step, every time.** React Flow's
+  `nodeDragThreshold` means the gesture only begins on the first move that clears it, and
+  the drag offset is captured at THAT point — so everything between the press and the first
+  move is discarded. A 256-unit drag sent as 12 equal steps arrives 21 units short. Aim a
+  drag by reading the transform back, never by arithmetic on the pointer delta, and use
+  more steps if the target matters.
 - **Assert the thing you are about to click is actually on top.** `document.elementFromPoint`
   plus `closest('.react-flow__node')` turns "the click silently went somewhere else" into a
   named failure. Both the inspector panel and the minimap cover parts of the canvas, so this

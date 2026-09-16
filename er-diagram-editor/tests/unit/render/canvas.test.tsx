@@ -4,7 +4,13 @@
  * Renders EntityNode inside a React Flow provider. The suite default is `node` (see the note in vite.config.ts), so a file that
  * mounts anything has to opt back up here.
  */
-import { ReactFlowProvider, applyNodeChanges, type Node, type NodeChange } from '@xyflow/react'
+import {
+  ReactFlow,
+  ReactFlowProvider,
+  applyNodeChanges,
+  type Node,
+  type NodeChange,
+} from '@xyflow/react'
 import { render, screen, type RenderResult } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 
@@ -21,6 +27,7 @@ import {
   type RelationshipId,
 } from '../../../src/domain'
 import {
+  AlignmentGuides,
   EntityNode,
   fallbackPosition,
   inFlightPositions,
@@ -31,6 +38,7 @@ import {
   sizesUnchanged,
   traceSets,
   type EntityNodeData,
+  type Guide,
   type Size,
 } from '../../../src/render'
 
@@ -101,7 +109,9 @@ describe('traceSets (FR-4.1, FR-4.2)', () => {
     const { diagram } = chain()
 
     expect(traceSets(diagram, 'ent_gone' as EntityId, undefined, undefined).entities.size).toBe(0)
-    expect(traceSets(diagram, undefined, 'rel_gone' as RelationshipId, undefined).entities.size).toBe(0)
+    expect(
+      traceSets(diagram, undefined, 'rel_gone' as RelationshipId, undefined).entities.size,
+    ).toBe(0)
   })
 
   it('a pinned relationship keeps tracing with nothing hovered (FR-4.4)', () => {
@@ -707,5 +717,71 @@ describe('the three tiers together', () => {
       expect(out).not.toBe(previous)
       expect(out[0]).toBe(previous[0])
     })
+  })
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ALIGNMENT GUIDES — THE ARITHMETIC BETWEEN A Guide AND A div (FR-3.5)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Which lines to draw is `alignment.ts`, and it has its own suite. What is left here is
+// the step that turns one of its answers into geometry, where the two axes mean opposite
+// things — a guide with `axis: 'x'` is a VERTICAL line, so `position` is its x and
+// `start`/`end` are its y extent. Swapping those produces a plausible-looking element in
+// the wrong place, which every test of the pure half would still pass.
+//
+// Mounted inside a real `<ReactFlow>` because `ViewportPortal` renders into a div the
+// library owns; with no provider it renders nothing and the assertions would pass on an
+// empty document. That the portal is stacked ABOVE the node layer is a CSS question and
+// belongs in `tests/e2e/interaction.spec.ts`, which has it.
+
+describe('AlignmentGuides (FR-3.5)', () => {
+  function renderGuides(guides: Guide[], zoom: number): RenderResult {
+    return render(
+      <ReactFlowProvider>
+        <ReactFlow nodes={[]} edges={[]}>
+          <AlignmentGuides guides={guides} zoom={zoom} />
+        </ReactFlow>
+      </ReactFlowProvider>,
+    )
+  }
+
+  it('draws nothing at all when nothing is aligned', () => {
+    const { container } = renderGuides([], 1)
+
+    expect(container.querySelectorAll('.erd-guide')).toHaveLength(0)
+  })
+
+  it('draws a vertical line at the x it pins, spanning the y range', () => {
+    const { container } = renderGuides([{ axis: 'x', position: 500, start: 40, end: 300 }], 1)
+    const line = container.querySelector<HTMLElement>('.erd-guide')
+
+    expect(line?.dataset['axis']).toBe('x')
+    expect(line?.style.transform).toBe('translate(500px, 40px)')
+    expect(line?.style.height).toBe('260px')
+  })
+
+  it('draws a horizontal line at the y it pins, spanning the x range', () => {
+    const { container } = renderGuides([{ axis: 'y', position: 178, start: 320, end: 836 }], 1)
+    const line = container.querySelector<HTMLElement>('.erd-guide')
+
+    expect(line?.style.transform).toBe('translate(320px, 178px)')
+    expect(line?.style.width).toBe('516px')
+  })
+
+  it('divides the thickness by the zoom, so the line stays a hairline', () => {
+    // It lives inside React Flow's scaled layer, so an undivided 1px is a 3px bar at 3x
+    // and invisible at 0.1x.
+    const { container } = renderGuides([{ axis: 'x', position: 0, start: 0, end: 10 }], 4)
+
+    expect(container.querySelector<HTMLElement>('.erd-guide')?.style.width).toBe('0.25px')
+  })
+
+  it('is hidden from assistive technology', () => {
+    // It appears and vanishes at pointer rate, and says nothing a sighted user is not
+    // already being told by the box moving under their hand (NFR-4.4).
+    const { container } = renderGuides([{ axis: 'y', position: 0, start: 0, end: 10 }], 1)
+
+    expect(container.querySelector('.erd-guide')?.getAttribute('aria-hidden')).toBe('true')
   })
 })

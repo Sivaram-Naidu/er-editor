@@ -24,10 +24,19 @@ export interface UiState {
   inspectorOpen: boolean
   validationPanelOpen: boolean
   minimapOpen: boolean
+  /**
+   * Round dragged boxes to the canvas grid (FR-3.5).
+   *
+   * Off by default, and that is the requirement's own word "toggleable" taken seriously:
+   * a diagram arranged by ELK does not sit on any grid, so switching this on by default
+   * would make the first box a user touches jump before they had moved it anywhere.
+   */
+  snapToGrid: boolean
   activeDialog: DialogId
 
   setTheme: (theme: Theme) => void
   setNotation: (notation: Notation) => void
+  setSnapToGrid: (snap: boolean) => void
   toggleInspector: () => void
   toggleValidationPanel: () => void
   toggleMinimap: () => void
@@ -44,6 +53,7 @@ export function createUiStore(): UiStore {
     inspectorOpen: true,
     validationPanelOpen: false,
     minimapOpen: true,
+    snapToGrid: false,
     activeDialog: undefined,
 
     setTheme: (theme) => {
@@ -51,6 +61,9 @@ export function createUiStore(): UiStore {
     },
     setNotation: (notation) => {
       set({ notation })
+    },
+    setSnapToGrid: (snapToGrid) => {
+      set({ snapToGrid })
     },
     toggleInspector: () => {
       set((state) => ({ inspectorOpen: !state.inspectorOpen }))

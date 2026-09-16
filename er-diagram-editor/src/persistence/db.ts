@@ -56,6 +56,8 @@ export interface DiagramRepository {
 export const LAST_OPENED_KEY = 'lastOpenedDiagramId'
 /** Preference key for the light/dark/system choice (FR-9.3). */
 export const THEME_KEY = 'theme'
+/** Preference key for the snap-to-grid toggle (FR-3.5). */
+export const SNAP_TO_GRID_KEY = 'snapToGrid'
 
 function toRecord(diagram: Diagram): DiagramRecord {
   return {

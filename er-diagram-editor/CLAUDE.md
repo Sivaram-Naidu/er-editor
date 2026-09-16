@@ -172,6 +172,14 @@ culling off.
     React Flow emits must be claimed by exactly one of them. Same shape of gap as the drag
     teleport above — each function was right on its own, and nothing asked what happened to
     what they declined.
+- **`ViewportPortal` is the right home for anything drawn in DIAGRAM units.** It mounts
+  into React Flow's own transformed layer, so a child positioned at `translate(640px, 0)`
+  pans and zooms with the boxes for free — but it inherits the scale, so any thickness has
+  to be divided by the zoom or a hairline becomes a bar at 3x and vanishes at 0.1x. The
+  portal div is last inside `.react-flow__viewport` with `z-index: auto`, so a child's own
+  z-index competes directly with the nodes' (0, or 5 when traced): `.erd-guide` uses 10 and
+  paints over them. Used by the alignment guides of FR-3.5; verified in Chrome by dragging
+  a guide across another box's body and looking at it.
 - **`elkjs/lib/elk.bundled.js` cannot run inside a Web Worker.** It is the main-thread
   build, and its job is to start a worker of its own: with no `workerFactory` it does
   `require('./elk-worker.min.js').Worker`, and `elk-worker.min.js` decides what to be from
@@ -201,6 +209,12 @@ culling off.
   `mouse.move` / `down` / `up` with no pause between the move and the press — see
   `coldClick` in `tests/e2e/helpers.ts`. Related: `test.fail()` outside a test body marks
   every test in the file.
+  - **And a scripted drag always lands short by its first step.** React Flow's
+    `nodeDragThreshold` means the gesture begins on the first move that clears it, and the
+    drag offset is captured at THAT point — everything between the press and that move is
+    discarded. A 256-unit drag sent as 12 equal steps arrives 21 units short, which looks
+    exactly like a snapping bug when you are testing snapping. Read the transform back
+    rather than trusting arithmetic on the pointer delta.
 - **Four ELK options that sound like they fix a wide layer and do nothing.** A table
   referenced by forty others puts all forty at one dependency depth, and `layered` stacks a
   depth into one column — 838x21134px, a ribbon unreadable at any zoom or detail level.

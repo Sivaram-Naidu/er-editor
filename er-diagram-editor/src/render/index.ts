@@ -18,6 +18,17 @@ export {
   type Size,
   type TraceSets,
 } from './reactflow/trace'
+export {
+  alignDrag,
+  alignmentGuides,
+  sameGuides,
+  type Alignment,
+  type DragAlignment,
+  type DragAlignmentRequest,
+  type Guide,
+  type Rect,
+} from './reactflow/overlays/alignment'
+export { AlignmentGuides, type AlignmentGuidesProps } from './reactflow/overlays/AlignmentGuides'
 export type { PaneSize } from './reactflow/SurfaceObserver'
 export { EntityNode, type EntityNodeData } from './reactflow/nodes/EntityNode'
 export { AttributeRow } from './reactflow/nodes/AttributeRow'

@@ -7,13 +7,14 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  useStoreApi,
   type Connection,
   type Edge,
   type Node,
   type NodeChange,
   type Viewport,
 } from '@xyflow/react'
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 
 import {
   indexOf,
@@ -31,6 +32,8 @@ import { CrowsFootMarkers } from './edges/endpoints'
 import { EntityNode, type EntityNodeData } from './nodes/EntityNode'
 import { SurfaceObserver, type PaneSize } from './SurfaceObserver'
 import { RevealController } from './RevealController'
+import { AlignmentGuides } from './overlays/AlignmentGuides'
+import { alignDrag, sameGuides, type Guide, type Rect } from './overlays/alignment'
 import {
   fallbackPosition,
   inFlightPositions,
@@ -45,6 +48,26 @@ import {
 
 const nodeTypes = { entity: EntityNode }
 const edgeTypes = { relationship: RelationshipEdge }
+
+/**
+ * The grid boxes snap to when FR-3.5's toggle is on, in diagram units.
+ *
+ * 16 because that is `Background`'s `gap` below, so the grid a user snaps to is the grid
+ * they can see. Two numbers here would be a tool that snaps to an invisible lattice.
+ */
+const SNAP_GRID: [number, number] = [16, 16]
+
+/**
+ * How close an edge has to come before the drag is pulled onto it — SCREEN pixels, which
+ * the caller divides by the zoom.
+ *
+ * In screen pixels because it is a statement about the pointer, and the pointer is in
+ * screen pixels. A fixed distance in diagram units would be an unreachable hair at 0.1x
+ * and a shove at 3x.
+ */
+const ALIGN_TOLERANCE_PX = 6
+
+const NO_GUIDES: readonly Guide[] = []
 
 export interface CanvasProps {
   diagram: Diagram
@@ -72,6 +95,13 @@ export interface CanvasProps {
     sourceAttributeId: AttributeId | undefined,
   ) => void
   onMoveEntities: (positions: Record<EntityId, Point>) => void
+  /**
+   * Round dragged positions to the grid (FR-3.5). Off by default.
+   *
+   * Alignment guides are NOT behind this flag — they are drawn on every drag, and only
+   * their magnet is stood down while the grid is on. See `handleNodesChange`.
+   */
+  snapToGrid?: boolean
   onViewportChange: (viewport: Viewport) => void
   /**
    * The measured size of the drawing surface, whenever it changes.
@@ -159,6 +189,44 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
   const [measured, setMeasured] = useState<Record<EntityId, Size>>({})
 
   /**
+   * The lines to draw beside the drag, and the zoom they were computed at (FR-3.5).
+   *
+   * Paired with the zoom rather than read from React Flow's store by the overlay, because
+   * a selector on the transform re-renders on every frame of every pan. The camera cannot
+   * move while a node is being dragged, so the value taken when the guides were computed
+   * is the value they are drawn at.
+   */
+  const [guides, setGuides] = useState<{ lines: readonly Guide[]; zoom: number }>({
+    lines: NO_GUIDES,
+    zoom: 1,
+  })
+
+  /**
+   * React Flow's own store, read imperatively for the camera.
+   *
+   * `useStoreApi` rather than `useStore`: the zoom and the pane size are wanted at the
+   * instant a drag frame arrives, and a selector on them would re-render this component —
+   * and re-run every memo in it — on every frame of every pan, which is the cost
+   * splitting the viewport out of the model store exists to avoid (CLAUDE.md).
+   */
+  const flowStore = useStoreApi()
+
+  /**
+   * Whether the settled frame about to arrive is the end of a DRAG.
+   *
+   * A pointer drag and an arrow-key nudge are indistinguishable by the time they reach
+   * `settledPositions` — React Flow reports both as a position change with
+   * `dragging: false`. They must not be treated alike: a nudge asks to move the box by one
+   * pixel, and running it through a six-pixel magnet would move it by six, or not at all.
+   * So alignment is applied at settle only when in-flight frames preceded it.
+   *
+   * A ref rather than state because nothing renders from it, and because reading state
+   * here would mean naming it as a dependency of a callback that is rebuilt at pointer
+   * rate.
+   */
+  const dragging = useRef(false)
+
+  /**
    * The pinned trace (FR-4.4), derived from the selection rather than stored beside it.
    *
    * Reusing the selection is what keeps this from being a feature: no new state, no second
@@ -170,9 +238,7 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
    * `tests/unit/render/redraw.test.tsx` exists to catch.
    */
   const pinnedRelationshipId =
-    props.selectedRelationshipIds.size === 1
-      ? [...props.selectedRelationshipIds][0]
-      : undefined
+    props.selectedRelationshipIds.size === 1 ? [...props.selectedRelationshipIds][0] : undefined
 
   const traced = useMemo(
     () => traceSets(diagram, hoveredEntityId, hoveredRelationshipId, pinnedRelationshipId),
@@ -383,12 +449,54 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
     [props],
   )
 
+  /**
+   * One drag frame run through the alignment magnet (FR-3.5).
+   *
+   * The camera is read here rather than passed in, so the tolerance is a fixed number of
+   * SCREEN pixels at any zoom and the candidate boxes are the ones actually on screen.
+   *
+   * With snap-to-grid on the tolerance is zero, which is not "off": the guides still
+   * appear, for the alignments the grid has already made exact. A second magnet on top of
+   * the grid would pull boxes straight back off it.
+   */
+  const align = useCallback(
+    (moving: Record<EntityId, Point>) => {
+      const { transform, width, height } = flowStore.getState()
+      const [x, y, zoom] = transform
+      const visible: Rect = {
+        x: -x / zoom,
+        y: -y / zoom,
+        width: width / zoom,
+        height: height / zoom,
+      }
+
+      return {
+        ...alignDrag({
+          moving,
+          positions: diagram.layout.positions,
+          sizes: measured,
+          visible,
+          tolerance: props.snapToGrid === true ? 0 : ALIGN_TOLERANCE_PX / zoom,
+        }),
+        zoom,
+      }
+    },
+    [flowStore, diagram.layout.positions, measured, props.snapToGrid],
+  )
+
   const handleNodesChange = useCallback(
     (changes: NodeChange[]) => {
       // Which changes count, and why, lives in trace.ts — see the two-tier note there.
       const moving = inFlightPositions(changes)
       if (Object.keys(moving).length > 0) {
-        setDragged((previous) => ({ ...previous, ...moving }))
+        dragging.current = true
+        const aligned = align(moving)
+        setDragged((previous) => ({ ...previous, ...aligned.positions }))
+        setGuides((previous) =>
+          sameGuides(previous.lines, aligned.guides) && previous.zoom === aligned.zoom
+            ? previous
+            : { lines: aligned.guides, zoom: aligned.zoom },
+        )
       }
 
       // Give React Flow back the sizes it measured, or it forgets them on the next
@@ -402,15 +510,23 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
 
       const moved = settledPositions(changes)
       if (Object.keys(moved).length > 0) {
+        const wasDragging = dragging.current
+        dragging.current = false
         // The gesture is over, so the whole overlay goes — not just the settled ids. A
         // partial clear would leave anything still in it pinned to a stale position with
         // no gesture left to move it. Both this and the commit happen in one event, so
         // React batches them and the node never renders between the two.
         setDragged((previous) => (Object.keys(previous).length === 0 ? previous : {}))
-        onMoveEntities(moved)
+        setGuides((previous) =>
+          previous.lines.length === 0 ? previous : { ...previous, lines: NO_GUIDES },
+        )
+        // The SAME call as the last in-flight frame, on the same input — so the position
+        // committed is the position last drawn, rather than the raw one, which would flick
+        // the box off its guide at the instant the button came up.
+        onMoveEntities(wasDragging ? align(moved).positions : moved)
       }
     },
-    [onMoveEntities],
+    [onMoveEntities, align],
   )
 
   return (
@@ -485,6 +601,11 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
          * "read-only" preview was writing move commands into the document it was
          * previewing. Connecting was gated; moving was not. */
         nodesDraggable={props.editable}
+        /* FR-3.5, the grid half. React Flow rounds the position it REPORTS, so both tiers
+           of the drag — the frames rendered here and the one committed to the document —
+           see the same number and nothing downstream has to know the grid exists. */
+        snapToGrid={props.snapToGrid ?? false}
+        snapGrid={SNAP_GRID}
         onConnect={handleConnect}
         /* Click the dot on one table, then click the other — no drag precision, and it
          * works on a trackpad. Same handles as the drag, so there is nothing extra to
@@ -501,7 +622,13 @@ function CanvasInner(props: CanvasProps): React.ReactElement {
       >
         <SurfaceObserver onResize={props.onPaneResize} onNodesMeasured={props.onNodesMeasured} />
         <RevealController request={props.revealRequest} />
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="var(--erd-grid)" />
+        <AlignmentGuides guides={guides.lines} zoom={guides.zoom} />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={SNAP_GRID[0]}
+          size={1}
+          color="var(--erd-grid)"
+        />
         <Controls showInteractive={false} />
         {props.showMinimap ? (
           /* `nodeColor` is required, not decorative. MiniMap derives a node's fill from

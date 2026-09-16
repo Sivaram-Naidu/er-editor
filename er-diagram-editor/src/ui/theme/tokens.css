@@ -34,6 +34,16 @@
   --erd-danger: #a4262c;
   --erd-warning: #8a5300;
 
+  /* ── Alignment guides (FR-3.5) ───────────────────────────────────────── */
+  /* The one place a second hue earns its keep, and the reason is the first one above:
+   * signal is reserved for the traced path, and a guide is drawn while a box is SELECTED
+   * and therefore already outlined in signal. A guide through that box's left edge in the
+   * same blue is invisible at exactly the moment it is meant to confirm something. It also
+   * cannot be the danger red, which means an error everywhere else in this palette.
+   *
+   * It costs nothing at rest: guides exist only while a drag is in flight. */
+  --erd-guide: #c2185b;
+
   /* ── Dimming, the other half of the hover treatment ──────────────────── */
   /* Raised from 0.28. At that level the un-traced tables were nearly erased, which
    * defeats the purpose: you trace a relationship in order to see it IN CONTEXT, and
@@ -108,6 +118,8 @@
 
   --erd-danger: #ff8a8a;
   --erd-warning: #e0a955;
+
+  --erd-guide: #ff79b0;
 
   --erd-dim-opacity: 0.45;
   --erd-minimap-mask: rgb(0 0 0 / 45%);

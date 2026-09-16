@@ -4,9 +4,12 @@ import {
   coldClick,
   entity,
   headerPoint,
+  nodeBoxes,
   openSample,
   selectedIds,
+  viewportZoom,
   waitForPersisted,
+  type NodeBox,
 } from './helpers'
 
 /**
@@ -531,4 +534,134 @@ test('duplicate and paste copy the selection without moving the original (FR-7.4
   // Nothing shouted, and the document is still loadable — a dangling reference would have
   // surfaced as a validation alert rather than as a crash.
   await expect(page.getByRole('alert')).toHaveCount(0)
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SNAP TO GRID AND ALIGNMENT GUIDES (FR-3.5)
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// These belong in a browser rather than in a unit test for two reasons that the geometry
+// suite cannot cover. The magnet is applied in two places — the frames Canvas renders and
+// the one it commits — and only a real gesture proves both places agree. And the guide is
+// a `ViewportPortal` child stacked over React Flow's own node layer, which is a question
+// about CSS stacking contexts that jsdom performs none of.
+
+/** The exact edge coordinates a box offers on one axis: near, centre, far. */
+function edgesOf(box: NodeBox, axis: 'x' | 'y'): number[] {
+  const start = axis === 'x' ? box.x : box.y
+  const size = axis === 'x' ? box.width : box.height
+  return [start, start + size / 2, start + size]
+}
+
+/** Does `name` share an exact edge with any other box on this axis? */
+function sharesAnEdge(boxes: NodeBox[], name: string, axis: 'x' | 'y'): boolean {
+  const subject = boxes.find((box) => box.name === name)
+  if (subject === undefined) return false
+
+  return boxes
+    .filter((box) => box.name !== name)
+    .some((other) =>
+      edgesOf(subject, axis).some((mine) =>
+        edgesOf(other, axis).some((theirs) => Math.abs(mine - theirs) < 0.001),
+      ),
+    )
+}
+
+test('a drag lines up with its neighbours, and lands exactly where the guide said', async ({
+  page,
+}) => {
+  /*
+   * The regression this is really guarding: alignment is computed twice, once for the
+   * frames that are DRAWN and once for the frame that is STORED. Snap only the drawn ones
+   * and the box rides the guide for the whole gesture and then flicks off it by up to the
+   * tolerance the moment the button comes up — and every unit test of either half still
+   * passes, because each half is right on its own.
+   */
+  await openSample(page)
+
+  // PRODUCT starts at (640, 260), which lines up with nothing horizontally: the other
+  // three all sit at y = 0 and none of them is 260 tall.
+  expect(sharesAnEdge(await nodeBoxes(page), 'PRODUCT', 'y')).toBe(false)
+
+  const zoom = await viewportZoom(page)
+  const product = entity(page, 'PRODUCT')
+  const start = await headerPoint(product)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+
+  let guidesSeen = 0
+  for (let frame = 1; frame <= 20; frame++) {
+    await page.mouse.move(start.x, start.y - (256 * zoom * frame) / 20)
+    guidesSeen = Math.max(guidesSeen, await page.locator('.erd-guide').count())
+  }
+
+  expect(guidesSeen, 'no alignment guide was ever drawn').toBeGreaterThan(0)
+  const drawn = await product.evaluate((node) => (node as HTMLElement).style.transform)
+  await page.mouse.up()
+
+  const committed = await product.evaluate((node) => (node as HTMLElement).style.transform)
+  expect(committed, 'the box jumped when the button came up').toBe(drawn)
+
+  // And the place it landed is an exact alignment rather than wherever the pointer was.
+  expect(sharesAnEdge(await nodeBoxes(page), 'PRODUCT', 'y')).toBe(true)
+
+  // The guides are a gesture, not a state: nothing is left on the canvas afterwards.
+  await expect(page.locator('.erd-guide')).toHaveCount(0)
+
+  // Still one undo step for the whole drag (FR-7.1).
+  await expect(page.getByRole('button', { name: /Undo/ })).toHaveAttribute(
+    'title',
+    'Undo Move entity',
+  )
+})
+
+test('the magnet lets go, so a deliberate offset survives', async ({ page }) => {
+  // The other half of the feature, and the failure it prevents is worse than no snapping
+  // at all: a tool that quietly refuses to put a box where you put it.
+  await openSample(page)
+
+  const zoom = await viewportZoom(page)
+  const customer = entity(page, 'CUSTOMER')
+  const start = await headerPoint(customer)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  for (let frame = 1; frame <= 20; frame++) {
+    await page.mouse.move(start.x, start.y + (40 * zoom * frame) / 20)
+  }
+  await page.mouse.up()
+
+  const boxes = await nodeBoxes(page)
+  const moved = boxes.find((box) => box.name === 'CUSTOMER')!
+  expect(moved.y, 'the drag was pulled back to the row it started on').toBeGreaterThan(20)
+  expect(sharesAnEdge(boxes, 'CUSTOMER', 'y'), 'a far-off edge still captured the drag').toBe(false)
+})
+
+test('snap to grid rounds the drop to the grid, and says whether it is on (FR-3.5)', async ({
+  page,
+}) => {
+  await openSample(page)
+
+  const toggle = page.getByRole('button', { name: /Snap to grid/ })
+  await expect(toggle, 'snapping starts on, which an ELK layout does not sit on').toHaveAttribute(
+    'aria-pressed',
+    'false',
+  )
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+  const zoom = await viewportZoom(page)
+  const order = entity(page, 'ORDER')
+  const start = await headerPoint(order)
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  // Deliberately not multiples of 16, and not equal, so a stuck axis fails too.
+  for (let frame = 1; frame <= 10; frame++) {
+    await page.mouse.move(start.x + (53 * zoom * frame) / 10, start.y + (91 * zoom * frame) / 10)
+  }
+  await page.mouse.up()
+
+  const moved = (await nodeBoxes(page)).find((box) => box.name === 'ORDER')!
+  expect(moved.x % 16, `x landed at ${String(moved.x)}, which is off the grid`).toBe(0)
+  expect(moved.y % 16, `y landed at ${String(moved.y)}, which is off the grid`).toBe(0)
+  expect(moved.x, 'the box did not move at all').not.toBe(320)
 })

@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 
 import { Editor, useAppliedTheme } from './features/editor'
-import { THEME_KEY, hasIndexedDb, recoverLastSession, sharedRepository } from './persistence'
+import {
+  SNAP_TO_GRID_KEY,
+  THEME_KEY,
+  hasIndexedDb,
+  recoverLastSession,
+  sharedRepository,
+} from './persistence'
 import { attachAutosave, useDiagramStore, useUiStore, type Theme } from './store'
 
 const THEMES: readonly Theme[] = ['light', 'dark', 'system']
@@ -51,6 +57,12 @@ export default function App(): React.ReactElement {
       const storedTheme = readTheme(
         await repository.getPreference<unknown>(THEME_KEY).catch(() => undefined),
       )
+      // Same treatment as the theme: read alongside the document, above the one
+      // cancellation check, and validated rather than trusted — a hand-edited row must not
+      // put a string where the canvas expects a boolean.
+      const storedSnap = await repository
+        .getPreference<unknown>(SNAP_TO_GRID_KEY)
+        .catch(() => undefined)
       if (lifecycle.cancelled) return
 
       if (recovered.diagram !== undefined) useDiagramStore.getState().load(recovered.diagram)
@@ -58,6 +70,7 @@ export default function App(): React.ReactElement {
       // Restored before `ready` flips, so the choice is in place for the first render
       // rather than applied over it.
       if (storedTheme !== undefined) useUiStore.getState().setTheme(storedTheme)
+      if (typeof storedSnap === 'boolean') useUiStore.getState().setSnapToGrid(storedSnap)
 
       detach = attachAutosave({ store: useDiagramStore, repository }).detach
       setReady(true)

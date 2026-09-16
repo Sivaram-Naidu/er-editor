@@ -124,6 +124,14 @@ body {
   cursor: not-allowed;
 }
 
+/* A two-state button reads its state off `aria-pressed`, so the accessible answer and
+   the visible one cannot drift apart. Used by the snap-to-grid toggle (FR-3.5). */
+.erd-btn[aria-pressed='true'] {
+  color: var(--erd-signal);
+  border-color: var(--erd-signal);
+  background: var(--erd-signal-wash);
+}
+
 .erd-btn--primary {
   background: var(--erd-signal);
   border-color: var(--erd-signal);

@@ -50,7 +50,9 @@ import { EmptyState } from './EmptyState'
 import { buildConnectCommands } from './connect'
 import { placeNewEntity } from './placement'
 import { useAutoLayout } from './useAutoLayout'
+import { SnapToggle } from './SnapToggle'
 import { Toolbar } from './Toolbar'
+import { useSnapToGrid } from './useSnapToGrid'
 import { buildSampleDiagram } from './sample'
 
 /**
@@ -288,7 +290,6 @@ export function Editor(): React.ReactElement {
     [execute, selectEntities, selectAttribute],
   )
 
-
   // NFR-3.2: every mouse action is reachable by keyboard.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
@@ -415,6 +416,7 @@ export function Editor(): React.ReactElement {
    * them alongside `Toolbar.tsx` rather than re-deriving what ought to disable a command.
    */
   const applyTheme = useApplyTheme()
+  const { snapToGrid, setSnapToGrid } = useSnapToGrid()
   const paletteCommands = useMemo<PaletteCommand[]>(
     () => [
       { id: 'add-entity', label: 'Add entity', hint: 'E', disabled: false, run: handleAddEntity },
@@ -474,6 +476,15 @@ export function Editor(): React.ReactElement {
         },
       },
       {
+        id: 'snap-to-grid',
+        label: snapToGrid ? 'Snap to grid: off' : 'Snap to grid: on',
+        hint: undefined,
+        disabled: false,
+        run: () => {
+          setSnapToGrid(!snapToGrid)
+        },
+      },
+      {
         id: 'issues',
         label: validationPanelOpen ? 'Hide issues' : 'Show issues',
         hint: undefined,
@@ -518,6 +529,8 @@ export function Editor(): React.ReactElement {
       openDialog,
       validationPanelOpen,
       toggleValidationPanel,
+      snapToGrid,
+      setSnapToGrid,
       lodOverride,
       setLodOverride,
       applyTheme,
@@ -577,6 +590,7 @@ export function Editor(): React.ReactElement {
         onSetLodOverride={setLodOverride}
         diagramMenu={diagramMenu}
         validationToggle={<ValidationToggle />}
+        snapToggle={<SnapToggle />}
         onExport={() => {
           openDialog('export')
         }}
@@ -621,6 +635,7 @@ export function Editor(): React.ReactElement {
                   onMoveEntities={handleMove}
                   onViewportChange={setViewport}
                   onPaneResize={setPaneSize}
+                  snapToGrid={snapToGrid}
                   showMinimap={minimapOpen}
                   issueSeverityByEntity={validation.severityByEntity}
                   issueSeverityByRelationship={validation.severityByRelationship}
