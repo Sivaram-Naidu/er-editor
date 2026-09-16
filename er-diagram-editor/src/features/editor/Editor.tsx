@@ -481,6 +481,55 @@ export function Editor(): React.ReactElement {
         disabled: selectedEntityIds.size + selectedRelationshipIds.size === 0,
         run: handleDeleteSelection,
       },
+      /*
+       * FR-9.2 says "every command", and for a while these five were the counter-example:
+       * the keymap bound them, the `?` sheet listed them because it renders the keymap,
+       * and the palette — the surface whose whole job is to expose every command — offered
+       * none of them. Nothing failed; the palette was simply less than it claimed.
+       *
+       * `disabled` repeats the handlers' own guards deliberately, the same way the toolbar
+       * does: a command that is offered and then silently does nothing is worse than one
+       * that is visibly unavailable.
+       */
+      {
+        id: 'copy',
+        label: 'Copy selection',
+        hint: hintFor('copy'),
+        disabled: selectedEntityIds.size === 0,
+        run: () => {
+          handleCopy()
+        },
+      },
+      {
+        id: 'cut',
+        label: 'Cut selection',
+        hint: hintFor('cut'),
+        disabled: selectedEntityIds.size === 0,
+        run: handleCut,
+      },
+      {
+        id: 'paste',
+        label: 'Paste',
+        hint: hintFor('paste'),
+        disabled: clipboardPayload === undefined || clipboardPayload.entities.length === 0,
+        run: handlePaste,
+      },
+      {
+        id: 'duplicate',
+        label: 'Duplicate selection',
+        hint: hintFor('duplicate'),
+        disabled: selectedEntityIds.size === 0,
+        run: handleDuplicate,
+      },
+      {
+        id: 'clear-selection',
+        label: 'Clear selection',
+        hint: hintFor('clear-selection'),
+        disabled: selectedEntityIds.size + selectedRelationshipIds.size === 0,
+        run: () => {
+          selectEntities([])
+        },
+      },
       {
         id: 'undo',
         label: history.undoLabel === undefined ? 'Undo' : `Undo ${history.undoLabel}`,
@@ -585,6 +634,12 @@ export function Editor(): React.ReactElement {
       handleDeleteSelection,
       selectedEntityIds.size,
       selectedRelationshipIds.size,
+      handleCopy,
+      handleCut,
+      handlePaste,
+      handleDuplicate,
+      clipboardPayload,
+      selectEntities,
       history.canUndo,
       history.canRedo,
       history.undoLabel,

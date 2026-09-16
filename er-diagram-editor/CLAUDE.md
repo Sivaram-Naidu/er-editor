@@ -97,6 +97,16 @@ underneath it. That is why the function lives in `lib` rather than in `render` �
 may not import `render`, and re-deriving the rule there would be the second place that
 decides the same thing.
 
+**Every shortcut that runs a command is also a palette command.** FR-9.2's wording is
+"exposing every command", and for a while it was not: the keymap bound copy, cut, paste,
+duplicate and Escape and the Ctrl+K palette offered none of them. Types cannot close it —
+the palette also carries commands with no key (Export, Detail, Theme), so the implication
+runs one way — and the list stays hand-built in `Editor.tsx` on purpose, because that
+component already owns every handler and every disabled condition. The guard is a pair test
+in `tests/unit/app/app.test.tsx` that opens the palette and requires a row for every chord
+the keymap answers to. Adding a shortcut means adding a palette entry, or that test fails
+by name.
+
 **Keyboard shortcuts are declared once, in `features/editor/shortcuts.ts`.** That table IS
 the keymap: the window handler dispatches from it, the `?` sheet renders it, and the Ctrl+K
 palette formats its hints from the same `Chord` objects. A hand-written row in the sheet is
@@ -508,6 +518,15 @@ culling off.
   browser's. Deciding a key is "not for the document" at the input and deciding it is "not
   for the keymap" at the window are two different decisions, and doing both in one place
   gets one of them wrong.
+- **A test that leaves a Radix dialog open when `cleanup()` runs blinds every later test in
+  the file.** Radix marks the rest of the document `aria-hidden` while a dialog is open —
+  that is the mechanism that actually confines a screen reader — and it restores it on
+  DISMISS, not when React Testing Library rips the tree out underneath it. The next test's
+  `getByRole` then finds nothing while its `getByText` still works, because only the first
+  consults accessibility. It presents as the empty state rendering its text but not its
+  button, in a test that passes on its own, which is a long way from the cause. Send Escape
+  in `afterEach` before unmounting. Related to the `getByRole('combobox')` note above: both
+  are the same `aria-hidden` doing its job at an inconvenient moment.
 - **jsdom does not implement `scrollIntoView` at all.** Not a stub that no-ops — the method
   is absent, so an unguarded call throws inside the passive effect and takes the component
   down with it. It is layout, and jsdom performs none. Feature-detect it.

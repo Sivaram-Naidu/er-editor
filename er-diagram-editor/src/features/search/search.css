@@ -66,9 +66,25 @@
   background: var(--erd-signal-wash);
 }
 
+/* Unavailable, and it has to LOOK it.
+ *
+ * This was `--erd-ink-muted`, which is one step down from the body ink and reads as
+ * ordinary text at 14px — a screenshot of the palette with nothing selected showed five
+ * greyed commands indistinguishable from the live ones above them. It mattered little
+ * while one command was ever disabled at a time; it matters now that the clipboard
+ * commands are here (FR-9.2) and all of them are unavailable until something is selected.
+ *
+ * `--erd-ink-faint` is the same token `.erd-btn:disabled` uses in the toolbar, so the two
+ * surfaces agree on what "you cannot do this yet" looks like. `aria-disabled` on the
+ * option is the half a screen reader gets; this is the half everyone else gets. */
 .erd-palette__option[data-disabled] {
-  color: var(--erd-ink-muted);
+  color: var(--erd-ink-faint);
   cursor: default;
+}
+
+.erd-palette__option[data-disabled] .erd-palette__hint {
+  color: var(--erd-ink-faint);
+  opacity: 0.7;
 }
 
 .erd-palette__label {

@@ -445,6 +445,35 @@ comment said it was. Nor is `font: inherit` what the measurement spec catches; t
 is. Both claims were checked by removing the code and re-running, and both comments now say
 only what was demonstrated.
 
+### Verified in a real browser (Chrome, 16 Sep 2026 — palette completeness session)
+
+The last item in Tier 3, and the smallest: five commands the keymap binds that the palette
+did not offer. What took the time was not adding them.
+
+| Thing                                                    | Evidence                                                                                                                                                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The five are there, with the right keys                   | Copy `Ctrl+C`, Cut `Ctrl+X`, Paste `Ctrl+V`, Duplicate `Ctrl+D`, Clear selection `Esc` — hints read out of the DOM, and each comes from the same `Chord` the keymap matches with.                                              |
+| They are greyed until they would work                      | Nothing selected: all five `aria-disabled`. CUSTOMER selected: copy, cut, duplicate and clear go live, Paste stays disabled until `Ctrl+C` fills the clipboard — which also confirms Duplicate deliberately leaves it alone.  |
+| **"Disabled" was invisible, and a unit test could not see it** | `aria-disabled` was right from the first version and the rows still rendered in body ink — the screenshot showed five commands that looked live and did nothing. `--erd-ink-muted` → `--erd-ink-faint`, the token the toolbar's disabled buttons already use. The e2e now compares the two computed colours; deleting the rule fails it. |
+| Running one from the palette does what the key does        | Fuzzy query `dup` → one row; Enter duplicates CUSTOMER (4 → 5 boxes), Undo reads "Undo Duplicate", palette closes.                                                                                                             |
+| The gap cannot silently reopen                             | A pair test in `tests/unit/app/app.test.tsx` mounts the app, opens the palette and requires a row for every chord the keymap answers to. Dropping Paste again fails it by name: *the keymap runs "Paste" on Ctrl+V and the palette does not offer it*. |
+| The gate                                                   | `pnpm verify` green: 867 unit tests in 40 files, 45 e2e specs. Coverage 93.0 / 84.2 / 94.2.                                                                                                                                     |
+
+Worth not re-deriving: the palette list stays hand-built in `Editor.tsx` — that component
+already owns every handler and every disabled condition, and a registry would be the second
+list this whole item is about. Types cannot close the gap either, because the implication
+only runs one way: the palette carries commands with no key at all (Export, Detail, Theme).
+So the invariant is asserted through the DOM, on the pair, and it is the ONE shortcut id
+exemption — opening the palette from inside the palette — that makes it readable.
+
+**And a jsdom trap that cost more than the feature.** A test that leaves a Radix dialog open
+when `cleanup()` runs poisons every later test in the file: Radix marks the rest of the
+document `aria-hidden` while a dialog is open and restores it on DISMISS, not when the tree
+is torn out underneath it. The next test's `getByRole` then finds nothing while its
+`getByText` still works, because only the first consults accessibility — so it presents as
+the empty state rendering its text but not its button, in a test that passes in isolation.
+`afterEach` sends Escape before unmounting.
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -522,9 +551,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 864 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
+- 867 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
   lines against an 80% gate.
-- **44 e2e specs in 3 files, ~85s, all passing.** `measurement.spec.ts` now checks L1 as
+- **45 e2e specs in 3 files, ~85s, all passing.** `measurement.spec.ts` now checks L1 as
   well as L2 — the level that draws the "N more" row, and the only one where
   `METRICS.moreRowHeight` can be compared with the DOM at all. No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
@@ -547,6 +576,7 @@ test:perf:browser` and by nothing else.** A separate `playwright.perf.config.ts`
   (FR-2.7) are the exception and are in the document on purpose — see the tier note.
 - 14 keyboard shortcuts in 4 groups, all in `features/editor/shortcuts.ts` — two of which
   (the arrow keys, and Shift for the marquee) are documented rather than bound, and say so.
+  Every one of the twelve that RUNS something also has a palette row, asserted on the pair.
 - **4 tiers of React Flow node change**, in `render/reactflow/trace.ts`: in-flight
   positions, settled positions, measured dimensions, and marquee selection. Every one of
   them was once dropped as "derived from the model"; none of them was. There is a test on
@@ -683,20 +713,24 @@ box on the occasions it guessed wrong. Reporting both, in a preview, one undo st
 the honest version. The diff the item wanted shown before applying is the preview itself,
 computed by the same pure function that then gets applied — not a second description of it.
 
-## Tier 3 — the features that matter at 100+ tables
+## Tier 3 — CLEAR as of 16 Sep 2026
 
-**The interaction list is CLEAR as of 16 Sep 2026.** Marquee select (FR-2.9), isolate mode
-(FR-2.8), per-entity pins (FR-2.7) and the shortcut sheet (FR-9.1) are all built, with
-browser evidence above. What is left in this tier is one small correctness item, and after
-that the tier is empty.
+Everything in it is built, each with browser evidence above: marquee select (FR-2.9),
+isolate mode (FR-2.8), per-entity pins (FR-2.7), the shortcut sheet (FR-9.1), snap and
+alignment guides (FR-3.5), and the palette completeness fix (FR-9.2).
 
-1. **The palette is missing four commands it claims to have (FR-9.2).** Found while
-   building the shortcut sheet, not before: the sheet lists copy, cut, paste and duplicate
-   because the keymap binds them, and the Ctrl+K palette offers none of the four. FR-9.2's
-   wording is "every command", so its SRS row has been corrected from Done to Partial
-   rather than the gap being left to be rediscovered. The fix is four entries in
-   `paletteCommands` in `Editor.tsx`, next to the handlers that already exist — small, but
-   it is a different feature from this one and was not folded into it.
+**What to pick up next is `docs/SRS.md` §13**, which is now the only list of unbuilt work.
+In its order:
+
+1. **Edges attaching to the foreign-key row** rather than to box centres. Per-row handles
+   already exist; the edges ignore them. Needs a fallback for L0 and L1, where those
+   handles are not rendered — which is the part that makes it more than a one-liner.
+2. **DBML export (FR-6.7)** — one directory plus one line in `src/io/registry.ts`, and
+   `docs/adding-a-format.md` is the recipe.
+
+Nothing in either is diagnosed yet, so the next session should expect to spend its first
+half finding out what is actually true rather than starting from a block like the ones
+above.
 
 **Expanding one entity from the "N more" row came off this list on 16 Sep 2026, and it was
 FR-2.7 all along** — see the browser table above. Worth not re-deriving: the pin lives in

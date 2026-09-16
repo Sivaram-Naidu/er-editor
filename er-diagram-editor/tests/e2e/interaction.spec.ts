@@ -1093,3 +1093,34 @@ test('pressing the row does not drag the table (FR-2.7)', async ({ page }) => {
   )
   expect(after).toBe(before)
 })
+
+test('the palette offers the clipboard commands, and greys them until they work (FR-9.2)', async ({
+  page,
+}) => {
+  /*
+   * The list itself is asserted in `tests/unit/app/app.test.tsx`, against the keymap. What
+   * only a browser can settle is whether "unavailable" is VISIBLE: `aria-disabled` was on
+   * these rows from the first version and they still rendered in body ink, so a screenshot
+   * showed five commands that looked live and did nothing. A unit test asserting the
+   * attribute passes on exactly that.
+   */
+  await openSample(page)
+
+  await page.keyboard.press('Control+k')
+  const listbox = page.getByRole('listbox')
+  await expect(listbox).toBeVisible()
+
+  const paste = listbox.getByRole('option', { name: /Paste/ })
+  const addEntity = listbox.getByRole('option', { name: /Add entity/ })
+  await expect(paste).toHaveAttribute('aria-disabled', 'true')
+  await expect(addEntity).toHaveAttribute('aria-disabled', 'false')
+
+  const [disabledColour, liveColour] = await Promise.all([
+    paste.evaluate((row) => getComputedStyle(row).color),
+    addEntity.evaluate((row) => getComputedStyle(row).color),
+  ])
+  expect(
+    disabledColour,
+    'a disabled command renders in the same ink as a live one, so nothing tells a sighted user it is unavailable',
+  ).not.toBe(liveColour)
+})
