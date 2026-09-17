@@ -1,6 +1,6 @@
 # What to work on next
 
-**Working queue. Updated 16 September 2026.**
+**Working queue. Updated 17 September 2026.**
 
 This file exists so a session starting cold — after `/clear`, or a week later, or someone
 else entirely — knows where the project actually stands and what to pick up, without
@@ -672,6 +672,90 @@ almost entirely into the layers a unit test can reach.
 
 ---
 
+## Tier 0 — everything between "it works" and a public URL
+
+**Opened 17 September 2026, and it is the top of the queue.** Tiers 1 to 3 are clear and
+`pnpm verify` is green — typecheck, lint, 867 unit tests, build and all 45 e2e specs, exit
+0 in 1.3 min on 17 Sep. Nothing on this list is a defect in the features; the tier exists
+because **production readiness was never a tier**, so none of it was ever queued anywhere.
+The tool is finished and unshippable at the same time, and these are the reasons.
+
+The decision this tier serves: V1 goes on a **free static host** — Cloudflare Pages, or
+Netlify. That is not a compromise. The app is static assets with no backend, no env vars
+and no network calls (SRS §1.2, NFR-5.2), so no part of it will ever need a paid runtime,
+and there is no cold start to design around. Vercel's free tier is Hobby, which is
+non-commercial only, so it is out for a company deployment rather than for a technical
+reason. Build settings anywhere: `pnpm build`, publish `dist`, Node 22, corepack enabled
+for the pinned `pnpm@12.3.4`. No SPA rewrite rule — there is no router.
+
+**Blocking a public URL.**
+
+1. **Thirteen commits exist only on one laptop.** `feat/re-import-and-interaction-budget`
+   is 13 ahead of `origin/main` and the branch is not on the remote at all — everything
+   from the Ctrl+K palette through re-import, snap, the shortcut sheet, marquee, isolate,
+   pins and the palette fix. A git-connected host pointed at `main` today would build the
+   12 Sep state. Push, open the PR, merge. **Do this first**: it is also the only item on
+   this list that protects work already done.
+
+2. **"Saved" is displayed before anything is saved, and that is now a data-loss bug rather
+   than a cosmetic one.** Diagnosed in Housekeeping below with the measurement: the
+   indicator reads "Saved" for the whole ~640 ms between a document appearing and the row
+   reaching IndexedDB, because opening a document never marks the store dirty while
+   autosave's 800 ms debounce runs. On one machine that is a race a developer shrugs at.
+   On a public URL, where the browser is the ONLY copy of the user's work (SRS §1.2), it
+   is the tool quietly losing a document while claiming it is safe. The fix is small —
+   opening a document should mark it unsaved — and the e2e suite already routes around the
+   indicator with `waitForPersisted`, which is the tell.
+
+3. **The app has never been run in anything but Chrome.** NFR-5.1 promises current and
+   previous Chrome, Edge, Firefox and Safari. Every browser-verified row in this file says
+   Chrome, and `playwright.config.ts` pins `channel: 'chrome'`. A public link means Safari
+   arrivals on day one, and the parts most likely to break there are the ones with no
+   fallback tested: the File System Access path (`fileSystem.ts` falls back to a download
+   link off Chromium — written, never exercised in the browsers that need it), the ELK
+   worker, and `html-to-image`'s canvas encoding. **Not a suite — one manual pass per
+   browser against the sample and Pagila, recorded here like the Chrome sessions above.**
+   Either it holds, or NFR-5.1 gets narrowed to what is actually true, the way NFR-1.3 and
+   NFR-1.4 were.
+
+**Wanted at launch, not blocking it.**
+
+4. **There is no Content-Security-Policy anywhere** (NFR-7.3 unmet) — nothing in
+   `index.html`, no headers file, and until now no host to serve one from. On a static host
+   it is a `_headers` file. What is worth knowing before writing it: **the clause as worded
+   — "no `unsafe-eval` and no `unsafe-inline`" — probably cannot hold as-is**, because
+   React Flow writes inline `style` attributes on the viewport and every node, and
+   `style-src` blocks style attributes without `unsafe-inline`. Expect to need
+   `style-src-attr 'unsafe-inline'` and to narrow the clause with the reason recorded.
+   The good news is that the rest is clean: `dist/index.html` has no inline script, and the
+   ELK worker loads from a same-origin URL rather than a blob.
+
+5. **The canvas is partly unreachable at 1280 px, from two known causes** — the inspector
+   draws over the right-hand tables, and the minimap eats the bottom-right corner. Both are
+   diagnosed in Housekeeping. They are tolerable when you know the workarounds and read as
+   "this tool is broken" when you do not, which is exactly what a first-time visitor is.
+
+6. **No LICENSE, and no THIRD-PARTY-LICENSES** (NFR-8.3 unmet). elkjs is EPL-2.0 and
+   NFR-8.2 already constrains how it is consumed; publishing without the file is the kind
+   of omission that is trivial before launch and awkward after.
+
+7. **NFR-5.3 says the app functions fully offline after first load. It does not.** There is
+   no service worker and no manifest — confirmed by grep, not by assumption. README and SRS
+   both advertise offline operation. Build it or stop claiming it; the claim is the part
+   that has to change today.
+
+8. **The React Flow attribution is hidden** (`Canvas.tsx:706`, `proOptions={{
+   hideAttribution: true }}`), and the dev server logs the library's notice asking that
+   only Pro subscribers do this. Stated precisely, because the loose version of this claim
+   is wrong: `@xyflow/react` is **MIT**, so hiding the badge breaches no licence term — it
+   declines a request the library makes in a console warning. That makes it a decision
+   about how a company deployment wants to treat a dependency it relies on heavily, not a
+   legal blocker. Restore it, or decide not to and note the decision here.
+
+**What is NOT on this list, so nobody adds it:** the two remaining items in SRS §13 —
+foreign-key row edge attachment, and DBML export. Both are real work and neither gates a
+launch. Ship without them.
+
 ## Tier 1 — what running it on real data found
 
 **This tier is CLEAR as of 12 Sep 2026.** The name changed three times and the changes are
@@ -719,8 +803,9 @@ Everything in it is built, each with browser evidence above: marquee select (FR-
 isolate mode (FR-2.8), per-entity pins (FR-2.7), the shortcut sheet (FR-9.1), snap and
 alignment guides (FR-3.5), and the palette completeness fix (FR-9.2).
 
-**What to pick up next is `docs/SRS.md` §13**, which is now the only list of unbuilt work.
-In its order:
+**What to pick up next is Tier 0 above**, opened 17 Sep 2026 — the work between a green
+`pnpm verify` and a URL somebody else can open. `docs/SRS.md` §13 remains the only list of
+unbuilt FEATURE work, and neither item in it gates a launch. In its order, for after Tier 0:
 
 1. **Edges attaching to the foreign-key row** rather than to box centres. Per-row handles
    already exist; the edges ignore them. Needs a fallback for L0 and L1, where those
@@ -831,6 +916,15 @@ the grid pulls boxes straight back off it.
   browser. Worth remembering why, because it will happen again — the table is written from
   what the unit suite proves, so a row can be entirely honest about the code and still be
   wrong about the product.
+  **It happened again, and was corrected on 17 Sep 2026: FR-8.3, FR-8.4 and FR-8.5 all read
+  "Open" for work that shipped with the validation panel.** All five FR-8.3 rules are in
+  `src/domain/validation/rules/`, `validator.ts` rolls severities up per entity and per
+  relationship for FR-8.4's markers, and FR-8.5 is met by the WeakMap cache rather than by
+  the middleware slot the SRS reserved for it. Note the direction: the earlier drift was
+  rows claiming Done for code that threw, this one is rows claiming Open for code that
+  works. **The table drifts in both directions, so neither "it says Done" nor "it says
+  Open" is evidence.** Checking these three took about ten minutes of reading the rule
+  files; that is the price of the row being trustworthy.
 - **`tests/unit/domain/validation.test.ts` holds a wall-clock assertion**
   (`expect(perRun).toBeLessThan(16)`) that failed once under 28-way worker contention and
   passed on retry. By this project's own convention that belongs in `pnpm test:perf`, not the
