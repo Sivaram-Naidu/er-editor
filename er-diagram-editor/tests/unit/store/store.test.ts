@@ -88,7 +88,7 @@ describe('diagramStore', () => {
     expect(store.getState().diagram.entities).toHaveLength(1)
   })
 
-  it('load replaces the document and clears history and the dirty flag', () => {
+  it('load replaces the document and clears history', () => {
     const store = createDiagramStore()
     store.getState().execute(addEntity(createEntity()))
 
@@ -96,6 +96,25 @@ describe('diagramStore', () => {
 
     expect(store.getState().diagram.name).toBe('Opened')
     expect(store.getState().history.canUndo).toBe(false)
+  })
+
+  // This assertion used to read `false`, unconditionally, and it was asserting the bug.
+  // Opening the sample scheduled an autosave (the autosaver watches the diagram
+  // REFERENCE, not this flag) while the indicator read "Saved" for the whole debounce
+  // window. The document existed in memory only, and a reload inside that window lost it.
+  it('load marks the document unsaved, because a freshly opened one is', () => {
+    const store = createDiagramStore()
+
+    store.getState().load(createDiagram({ name: 'The sample' }))
+
+    expect(store.getState().isDirty).toBe(true)
+  })
+
+  it('load leaves it clean when the caller says it came from storage', () => {
+    const store = createDiagramStore()
+
+    store.getState().load(createDiagram({ name: 'Reopened' }), { persisted: true })
+
     expect(store.getState().isDirty).toBe(false)
   })
 
@@ -378,6 +397,30 @@ describe('attachAutosave', () => {
 
     const saved = await repository.get(store.getState().diagram.id)
     expect(saved?.entities).toHaveLength(1)
+    expect(store.getState().isDirty).toBe(false)
+
+    await handle.detach()
+  })
+
+  it('does not read "Saved" while an opened document is still being written', async () => {
+    // The regression this pins, in the terms the user experiences it: open the sample,
+    // reload inside the debounce window, lose the document — having been told it was
+    // saved. `isDirty` is what the toolbar renders as "Saving…" vs "Saved", so the
+    // assertion is on the flag across the window rather than on wall-clock timing.
+    const repository = new InMemoryDiagramRepository()
+    const store = createDiagramStore()
+    const handle = attachAutosave({ store, repository, delayMs: 10 })
+
+    store.getState().load(createDiagram({ name: 'The sample' }))
+
+    // Before the debounce fires: nothing is in storage yet, and the store says so.
+    expect(await repository.get(store.getState().diagram.id)).toBeUndefined()
+    expect(store.getState().isDirty).toBe(true)
+
+    await vi.advanceTimersByTimeAsync(50)
+
+    // Only now is "Saved" the truth.
+    expect(await repository.get(store.getState().diagram.id)).toBeDefined()
     expect(store.getState().isDirty).toBe(false)
 
     await handle.detach()

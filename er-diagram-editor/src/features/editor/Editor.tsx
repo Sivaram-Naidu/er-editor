@@ -679,7 +679,9 @@ export function Editor(): React.ReactElement {
         void library.open(id).then((opened) => {
           if (opened === undefined) return
           selectEntities([])
-          load(opened)
+          // Came out of IndexedDB, so it is saved by definition — unlike New, the sample
+          // and Import, which all load content that exists nowhere but memory.
+          load(opened, { persisted: true })
         })
       }}
       onDelete={(id) => {

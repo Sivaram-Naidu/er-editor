@@ -38,8 +38,15 @@ export interface DiagramStoreState {
   transaction: (label: string, commands: readonly Command[]) => void
   undo: () => void
   redo: () => void
-  /** Open a document. Clears history — see CommandStack.reset. */
-  load: (diagram: Diagram) => void
+  /**
+   * Open a document. Clears history — see CommandStack.reset.
+   *
+   * `persisted` says whether this document is ALREADY in storage. It defaults to false,
+   * and the default is the safe direction: a document shown as unsaved when it is saved
+   * costs a redundant "Saving…" flicker, while the reverse told the user their work was
+   * safe when it was not yet written (see the note on `isDirty` below).
+   */
+  load: (diagram: Diagram, options?: { persisted?: boolean }) => void
   /** Called by the autosaver once a write lands. */
   markSaved: () => void
   /** Called by the autosaver when a write fails. Leaves `isDirty` set: it still is. */
@@ -118,8 +125,24 @@ export function createDiagramStore(options: DiagramStoreOptions = {}): DiagramSt
       redo: () => {
         publish(stack.redo(), true)
       },
-      load: (diagram) => {
-        publish(stack.reset(diagram), false)
+      /**
+       * Opening marks the store DIRTY unless the caller says the document came from
+       * storage.
+       *
+       * This was `false` unconditionally, and that is the bug it fixes: the autosaver
+       * subscribes to the diagram REFERENCE, not to `isDirty`, so opening the sample
+       * scheduled a write and left the indicator reading "Saved" for the whole ~640 ms
+       * debounce before that write landed. A reload inside that window lost the document
+       * while the UI claimed it was safe — and in a tool whose only storage is the
+       * browser (SRS §1.2) that is the worst thing the indicator can do.
+       *
+       * Two callers pass `persisted: true`, and both genuinely read the document out of
+       * IndexedDB: boot recovery in `App.tsx`, and opening from the diagram library.
+       * Everything else — a new diagram, the sample, an import — is content that exists
+       * nowhere but memory at the moment it is loaded.
+       */
+      load: (diagram, options) => {
+        publish(stack.reset(diagram), options?.persisted !== true)
       },
       markSaved: () => {
         set({ isDirty: false, saveError: undefined })

@@ -474,6 +474,17 @@ is torn out underneath it. The next test's `getByRole` then finds nothing while 
 the empty state rendering its text but not its button, in a test that passes in isolation.
 `afterEach` sends Escape before unmounting.
 
+### Verified in a real browser (Chrome, 17 Sep 2026 — save indicator session)
+
+| Thing                                | Evidence                                                                                                                                              |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Open the sample, before the write    | Indicator reads **"Saving…"** with `data-dirty="true"`, and IndexedDB has no row yet — where it used to read "Saved" for the whole ~640 ms             |
+| Open the sample, after the write     | Resolves to "Saved" on its own, row present. It does not stick on "Saving…"                                                                            |
+| Reload onto a recovered document     | Reads "Saved" immediately — the boot path passes `persisted: true`, so it is not announced as unsaved with no write scheduled to clear it              |
+| Ablation, both directions            | Reverting the one line in `diagramStore.ts` fails the new spec (`toHaveText` got "Saved"); restoring it passes. The real line, not a CSS override      |
+
+---
+
 ### Known broken
 
 1. **NFR-1.3 is met as narrowed, and one gesture is 8 ms outside it by decision.** At Detail:
@@ -551,9 +562,9 @@ evidence:
 
 ### Numbers, so drift stays visible
 
-- 867 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
+- 870 unit tests in 40 files, ~50s. Coverage 93.0% statements / 84.2% branches / 94.2%
   lines against an 80% gate.
-- **45 e2e specs in 3 files, ~85s, all passing.** `measurement.spec.ts` now checks L1 as
+- **47 e2e specs in 3 files, ~85s, all passing.** `measurement.spec.ts` now checks L1 as
   well as L2 — the level that draws the "N more" row, and the only one where
   `METRICS.moreRowHeight` can be compared with the DOM at all. No `test.fail()` markers left. `pnpm
 test:e2e` is part of `pnpm verify`, and the config uses `channel: 'chrome'` so no browser
@@ -697,15 +708,9 @@ for the pinned `pnpm@12.3.4`. No SPA rewrite rule — there is no router.
    12 Sep state. Push, open the PR, merge. **Do this first**: it is also the only item on
    this list that protects work already done.
 
-2. **"Saved" is displayed before anything is saved, and that is now a data-loss bug rather
-   than a cosmetic one.** Diagnosed in Housekeeping below with the measurement: the
-   indicator reads "Saved" for the whole ~640 ms between a document appearing and the row
-   reaching IndexedDB, because opening a document never marks the store dirty while
-   autosave's 800 ms debounce runs. On one machine that is a race a developer shrugs at.
-   On a public URL, where the browser is the ONLY copy of the user's work (SRS §1.2), it
-   is the tool quietly losing a document while claiming it is safe. The fix is small —
-   opening a document should mark it unsaved — and the e2e suite already routes around the
-   indicator with `waitForPersisted`, which is the tell.
+2. **~~"Saved" is displayed before anything is saved.~~ Fixed 17 Sep 2026**, with browser
+   evidence above and the mechanism written up in Housekeeping. Two unit tests and two e2e
+   specs, all four checked against a reverted line in both directions.
 
 3. **The app has never been run in anything but Chrome.** NFR-5.1 promises current and
    previous Chrome, Edge, Firefox and Safari. Every browser-verified row in this file says
@@ -953,14 +958,29 @@ the grid pulls boxes straight back off it.
   the click-to-select bug; that one is now fixed and this has not been seen again, so retest
   before spending time on it.
 
-- **"Saved" is displayed before anything is saved.** Measured in Chrome: the indicator reads
-  "Saved" — never "Saving…", no `data-dirty` — for the whole ~640 ms between the sample
-  appearing on screen and the row reaching IndexedDB, because opening a diagram never marks
-  the store dirty while autosave's 800 ms debounce runs. A reload or a closed tab inside that
-  window loses the document while the UI claims it is safe. `Autosaver` and the `isDirty`
-  wiring are both fine in isolation; what is missing is that opening a document should mark
-  it unsaved. The e2e suite works around it with `waitForPersisted` in `tests/e2e/helpers.ts`
-  rather than trusting the indicator.
+- **~~"Saved" is displayed before anything is saved.~~ Fixed 17 Sep 2026** — see the browser
+  table above. The diagnosis held: `Autosaver` and the `isDirty` wiring were both fine, and
+  `load` marked the store clean unconditionally. What made it a data-loss bug rather than a
+  cosmetic one is that **the autosaver subscribes to the diagram REFERENCE, not to
+  `isDirty`** — so opening the sample really did schedule a write, and the indicator really
+  did read "Saved" for the whole 800 ms debounce before it landed.
+
+  The fix is `load(diagram, { persisted?: boolean })`, defaulting to **dirty**. The default
+  direction is the whole point: claiming unsaved when saved costs a flicker, claiming saved
+  when unsaved costs the document. Two of the five call sites pass `persisted: true`, and
+  both genuinely read out of IndexedDB — boot recovery and opening from the library. New,
+  the sample and Import all load content that exists nowhere but memory.
+
+  **Worth not re-deriving: marking dirty unconditionally is wrong and the tests would not
+  have caught it.** At boot, `load` runs BEFORE `attachAutosave` subscribes, so `lastDiagram`
+  is initialised to the recovered document and no write is ever scheduled for it — a
+  document marked dirty there would sit on "Saving…" forever. That is what the second e2e
+  spec pins.
+
+  One existing unit test asserted the bug (`load ... clears the dirty flag`) and was
+  rewritten rather than deleted. `waitForPersisted` stays in `tests/e2e/helpers.ts` — it
+  answers "did the row land", which is still a different question from what the indicator
+  claims.
 
 - **The inspector panel is drawn over the canvas, not beside it.** At both 1280x720 and
   1400x900, selecting anything puts the panel on top of the two right-hand tables of the

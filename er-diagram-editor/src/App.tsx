@@ -65,7 +65,13 @@ export default function App(): React.ReactElement {
         .catch(() => undefined)
       if (lifecycle.cancelled) return
 
-      if (recovered.diagram !== undefined) useDiagramStore.getState().load(recovered.diagram)
+      // `persisted: true` — this document was just read OUT of IndexedDB, so it is not
+      // unsaved. Without it the indicator would open on "Saving…" and stay there: the
+      // autosave subscription is attached below, after this load, so nothing would ever
+      // schedule the write that clears the flag.
+      if (recovered.diagram !== undefined) {
+        useDiagramStore.getState().load(recovered.diagram, { persisted: true })
+      }
       setProblem(recovered.problem)
       // Restored before `ready` flips, so the choice is in place for the first render
       // rather than applied over it.

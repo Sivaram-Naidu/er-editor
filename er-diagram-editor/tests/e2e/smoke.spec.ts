@@ -1,6 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
 
-import { entity, importFile, mergeFile, nodeTransforms, openSample } from './helpers'
+import {
+  entity,
+  importFile,
+  mergeFile,
+  nodeTransforms,
+  openSample,
+  waitForPersisted,
+} from './helpers'
 
 /** Three tables in a chain: the shape a layered layout has an obvious answer for. */
 const CHAIN_SQL = `
@@ -159,6 +166,44 @@ test('importing a SQL schema arranges it instead of leaving it on the grid', asy
   )
   expect(xs[0]).toBeLessThan(xs[1]!)
   expect(xs[1]).toBeLessThan(xs[2]!)
+})
+
+test('the save indicator does not claim "Saved" before anything is saved', async ({ page }) => {
+  // The bug this pins was measured in Chrome: the indicator read "Saved" — never
+  // "Saving…", no `data-dirty` — for the whole ~640 ms between the sample appearing and
+  // the row reaching IndexedDB, because opening a document never marked the store dirty.
+  // A reload inside that window lost the document while the UI said it was safe, and the
+  // browser is the only copy of the user's work (SRS §1.2).
+  //
+  // Asserted on the indicator rather than on `waitForPersisted`, deliberately: the helper
+  // exists BECAUSE the indicator could not be trusted, so trusting it here is the point.
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Open the sample schema' }).click()
+  await expect(entity(page, 'CUSTOMER')).toBeVisible()
+
+  // The document is on screen and in memory only. 800 ms of debounce to observe this in.
+  const status = page.locator('.erd-status').filter({ hasText: /Saving|Saved/ })
+  await expect(status).toHaveText('Saving…')
+  await expect(status).toHaveAttribute('data-dirty', 'true')
+
+  // And it resolves on its own, rather than sticking on "Saving…" forever.
+  await expect(status).toHaveText('Saved', { timeout: 10_000 })
+  await waitForPersisted(page)
+})
+
+test('a reopened diagram is not announced as unsaved', async ({ page }) => {
+  // The other half, and the reason `load` takes `persisted` rather than always marking
+  // dirty: boot recovery reads the document out of IndexedDB, and the autosave
+  // subscription attaches AFTER that load — so a document marked dirty here would sit on
+  // "Saving…" forever with no write scheduled to clear it.
+  await openSample(page)
+  await waitForPersisted(page)
+
+  await page.reload()
+  await expect(entity(page, 'CUSTOMER')).toBeVisible()
+
+  const status = page.locator('.erd-status').filter({ hasText: /Saving|Saved/ })
+  await expect(status).toHaveText('Saved')
 })
 
 test('IndexedDB is available in the real browser', async ({ page }) => {
